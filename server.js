@@ -66,12 +66,23 @@ const ALLOWED_ORIGINS = [
   process.env.LANDING_URL  || 'http://localhost:5175',
 ].filter(Boolean);
 
-const io = new Server(server, {
-  cors: {
-    origin: ALLOWED_ORIGINS,
-    methods: ['GET', 'POST'],
-    credentials: true,
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+      return callback(null, true);
+    }
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error('Not allowed by CORS'));
   },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  credentials: true,
+};
+
+const io = new Server(server, {
+  cors: corsOptions,
   transports: ['websocket', 'polling'],
   pingTimeout: 20000,
   pingInterval: 10000,
@@ -79,10 +90,7 @@ const io = new Server(server, {
 });
 
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({
-  origin: ALLOWED_ORIGINS,
-  credentials: true,
-}));
+app.use(cors(corsOptions));
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (msg) => logger.info(msg.trim()) } }));
 app.use(express.json({ limit: '10mb' }));
