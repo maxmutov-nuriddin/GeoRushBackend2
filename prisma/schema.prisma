@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String       @id @default(uuid())
+  username            String       @unique
+  email               String?      @unique
+  phone               String?      @unique
+  passwordHash        String
+  teamId              String?
+  team                Team?        @relation("TeamMembers", fields: [teamId], references: [id])
+  ownedTeams          Team[]       @relation("TeamOwner")
+  color               String       @default("#00ff88")
+  avatarUrl           String?
+  xp                  Int          @default(0)
+  level               Int          @default(1)
+  totalArea           Float        @default(0)
+  totalDistance       Float        @default(0)
+  territoriesCaptured Int          @default(0)
+  territoriesLost     Int          @default(0)
+  lastLocation        Json?        // GeoJSON point or simple object
+  lastSeen            DateTime?
+  city                String?
+  country             String?
+  isOnline            Boolean      @default(false)
+  socketId            String?
+  expoPushToken       String?
+  termsAccepted       Boolean      @default(false)
+  isAdmin             Boolean      @default(false)
+  isBanned            Boolean      @default(false)
+  passwordResetToken  String?
+  passwordResetExpires DateTime?
+
+  coins               Int          @default(0)
+  ownedSkins          String[]
+  activeSkinColor     String?
+  activeSkinMarker    String?
+  activeSkinTrail     String?
+  lastDailyClaim      DateTime?
+
+  isPremium           Boolean      @default(false)
+  premiumUntil        DateTime?
+  premiumTier         String       @default("free") // "free", "pro", "ultra"
+  telegramChatId      String?
+
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  territories         Territory[]
+  createdMarkers      TeamMarker[]
+  teamRequests        TeamRequest[]
+  eventsAsActor       GameEvent[]  @relation("ActorEvents")
+  eventsAsTarget      GameEvent[]  @relation("TargetEvents")
+  antiCheatLogs       AntiCheatLog[]
+  warningsReceived    Warning[]    @relation("WarningsReceived")
+  warningsGiven       Warning[]    @relation("WarningsGiven")
+  managedTeams        Team[]       @relation("TeamMarkerAdmins")
+}
+
+model Team {
+  id                  String       @id @default(uuid())
+  name                String       @unique
+  tag                 String       @unique
+  color               String       @default("#ff6600")
+  description         String?      @default("")
+  ownerId             String?
+  owner               User?        @relation("TeamOwner", fields: [ownerId], references: [id])
+  markerAdmins        User[]       @relation("TeamMarkerAdmins")
+  isPublic            Boolean      @default(true)
+  totalArea           Float        @default(0)
+  memberCount         Int          @default(0)
+  wins                Int          @default(0)
+
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  members             User[]       @relation("TeamMembers")
+  territories         Territory[]
+  markers             TeamMarker[]
+  requests            TeamRequest[]
+}
+
+model TeamMarker {
+  id                  String       @id @default(uuid())
+  teamId              String
+  team                Team         @relation(fields: [teamId], references: [id])
+  lat                 Float
+  lng                 Float
+  label               String?      @default("")
+  order               Int          @default(1)
+  createdById         String?
+  createdBy           User?        @relation(fields: [createdById], references: [id])
+
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+}
+
+model TeamRequest {
+  id                  String       @id @default(uuid())
+  teamId              String
+  team                Team         @relation(fields: [teamId], references: [id])
+  userId              String
+  user                User         @relation(fields: [userId], references: [id])
+  type                String       // "request", "invite"
+  status              String       @default("pending") // "pending", "accepted", "declined"
+
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@unique([teamId, userId, type])
+}
+
+model Territory {
+  id                  String       @id @default(uuid())
+  ownerId             String
+  owner               User         @relation(fields: [ownerId], references: [id])
+  teamId              String?
+  team                Team?        @relation(fields: [teamId], references: [id])
+  polygon             Json         // GeoJSON polygon structure
+  area                Float
+  color               String
+  capturedAt          DateTime     @default(now())
+  name                String?
+  emoji               String?
+
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  events              GameEvent[]
+}
+
+model GameEvent {
+  id                  String       @id @default(uuid())
+  type                String
+  actorId             String?
+  actor               User?        @relation("ActorEvents", fields: [actorId], references: [id])
+  targetId            String?
+  target              User?        @relation("TargetEvents", fields: [targetId], references: [id])
+  territoryId         String?
+  territory           Territory?   @relation(fields: [territoryId], references: [id])
+  data                Json?        // flexible data
+
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+}
+
+model AntiCheatLog {
+  id                  String       @id @default(uuid())
+  userId              String
+  user                User         @relation(fields: [userId], references: [id])
+  type                String       // "speed", "teleport", "trail_gap", "invalid_coords"
+  reason              String?      @default("")
+  lat                 Float?
+  lng                 Float?
+  speed               Float?
+  count               Int          @default(1)
+
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+}
+
+model BotSession {
+  id                  String       @id @default(uuid())
+  chatId              String
+  type                String       // "pendingObuna", "pendingReceipt"
+  expiresAt           DateTime
+
+  createdAt           DateTime     @default(now())
+  
+  @@unique([chatId, type])
+}
+
+model OTPSession {
+  id                  String       @id @default(uuid())
+  token               String       @unique
+  phone               String
+  otp                 String?
+  otpHash             String?
+  chatId              String?      // Changed from Int to String for consistency with Telegram IDs
+  otpSent             Boolean      @default(false)
+  verified            Boolean      @default(false)
+  purpose             String       @default("register") // "register", "reset"
+  expiresAt           DateTime
+
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+}
+
+model Warning {
+  id                  String       @id @default(uuid())
+  userId              String
+  user                User         @relation("WarningsReceived", fields: [userId], references: [id])
+  adminId             String
+  admin               User         @relation("WarningsGiven", fields: [adminId], references: [id])
+  reason              String
+  severity            String       @default("medium") // "low", "medium", "high"
+
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+}

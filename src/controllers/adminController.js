@@ -1,0 +1,786 @@
+const bcrypt = require('bcryptjs');
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
+const { getOnlinePlayers } = require('../socket/index');
+const { TIERS } = require('../config/tiers');
+
+// ─── Dashboard stats ───────────────────────────────────────────────────────────
+async function getStats(req, res, next) {
+  try {
+    const now = new Date();
+    const today     = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today.getTime() - 86400000);
+    const week      = new Date(Date.now() - 7  * 86400000);
+    const month     = new Date(Date.now() - 30 * 86400000);
+
+    const [
+      totalUsers, bannedUsers, adminUsers,
+      totalTerritories, totalTeams, eventsToday,
+      onlineUsers, antiCheatToday, warningsTotal,
+      newToday, newYesterday, newWeek, newMonth,
+      premiumTotal, premiumPro, premiumUltra,
+      premiumWeek, premiumMonth,
+      coinsResult,
+    ] = await Promise.all([
+      prisma.user.count({ where: { isAdmin: false } }),
+      prisma.user.count({ where: { isBanned: true } }),
+      prisma.user.count({ where: { isAdmin: true } }),
+      prisma.territory.count(),
+      prisma.team.count(),
+      prisma.gameEvent.count({ where: { createdAt: { gte: today } } }),
+      prisma.user.count({ where: { isOnline: true, isAdmin: false } }),
+      prisma.antiCheatLog.count({ where: { createdAt: { gte: today } } }),
+      prisma.warning.count(),
+      // Ro'yxatdan o'tganlar
+      prisma.user.count({ where: { createdAt: { gte: today }, isAdmin: false } }),
+      prisma.user.count({ where: { createdAt: { gte: yesterday, lt: today }, isAdmin: false } }),
+      prisma.user.count({ where: { createdAt: { gte: week }, isAdmin: false } }),
+      prisma.user.count({ where: { createdAt: { gte: month }, isAdmin: false } }),
+      // Premium statistika
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now } } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro' } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra' } }),
+      prisma.user.count({ where: { isPremium: true, updatedAt: { gte: week } } }),
+      prisma.user.count({ where: { isPremium: true, updatedAt: { gte: month } } }),
+      // Coins iqtisodi
+      prisma.user.aggregate({ _sum: { coins: true } }),
+    ]);
+
+    // Taxminiy daromad (so'm)
+    const estimatedRevenueSom = (premiumPro * 39900) + (premiumUltra * 79900);
+    const estimatedRevenueStars = (premiumPro * 150) + (premiumUltra * 300);
+
+    res.json({
+      totalUsers, bannedUsers, adminUsers,
+      totalTerritories, totalTeams, eventsToday,
+      onlineUsers, antiCheatToday, warningsTotal,
+      // Registratsiya
+      newToday, newYesterday, newWeek, newMonth,
+      // Premium
+      premiumTotal, premiumPro, premiumUltra,
+      premiumWeek, premiumMonth,
+      // Daromad (taxminiy — hozirgi aktiv obunalar asosida)
+      estimatedRevenueSom,
+      estimatedRevenueStars,
+      totalCoinsInCirculation: coinsResult._sum.coins || 0,
+    });
+  } catch (err) { next(err); }
+}
+
+// ─── Users ─────────────────────────────────────────────────────────────────────
+async function getUsers(req, res, next) {
+  try {
+    const { search = '', page = 1, limit = 20 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+    
+    const searchCondition = search ? {
+      OR: [
+        { username: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } }
+      ]
+    } : {};
+    const where = { isAdmin: false, ...searchCondition };
+
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: { id: true, username: true, phone: true, color: true, xp: true, level: true, totalArea: true, territoriesCaptured: true, isOnline: true, isAdmin: true, isBanned: true, createdAt: true, lastSeen: true, teamId: true, termsAccepted: true },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: Number(limit)
+      }),
+      prisma.user.count({ where }),
+    ]);
+    
+    const mappedUsers = users.map(u => ({ ...u, _id: u.id }));
+    res.json({ users: mappedUsers, total, page: Number(page), limit: Number(limit) });
+  } catch (err) { next(err); }
+}
+
+async function getUser(req, res, next) {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { team: { select: { name: true, tag: true, color: true } } }
+    });
+    if (!user) return res.status(404).json({ error: 'Topilmadi' });
+    
+    delete user.passwordHash;
+    delete user.passwordResetToken;
+    delete user.passwordResetExpires;
+    user._id = user.id;
+
+    const territories = await prisma.territory.count({ where: { ownerId: req.params.id } });
+    res.json({ user: { ...user, territoriesCount: territories } });
+  } catch (err) { next(err); }
+}
+
+async function updateUser(req, res, next) {
+  try {
+    const { xp, level, color } = req.body;
+    const update = {};
+    if (xp !== undefined) update.xp = Math.max(0, Number(xp));
+    if (level !== undefined) update.level = Math.max(1, Number(level));
+    if (color !== undefined) update.color = color;
+    
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: update,
+      select: { id: true, username: true, xp: true, level: true, color: true, coins: true }
+    });
+    if (!user) return res.status(404).json({ error: 'Topilmadi' });
+    res.json({ user: { ...user, _id: user.id } });
+  } catch (err) { next(err); }
+}
+
+async function givePremium(req, res, next) {
+  try {
+    const days = Math.max(1, Math.min(365, Number(req.body.days) || 30));
+    const MS   = days * 24 * 60 * 60 * 1000;
+    const tier = req.body.tier === 'ultra' ? 'ultra' : 'pro';
+    // bonus=true bo'lganda welcome coins BERILMAYDI (tekinga, sovg'a sifatida)
+    const isBonus     = req.body.bonus === true || req.body.bonus === 'true';
+    const welcomeCoins = isBonus ? 0 : TIERS[tier].welcomeCoins;
+
+    // Agar hali faol premium bo'lsa — muddatini uzaytirish
+    const existing = await prisma.user.findUnique({ where: { id: req.params.id }, select: { premiumUntil: true } });
+    if (!existing) return res.status(404).json({ error: 'Topilmadi' });
+
+    const base = (existing.premiumUntil && existing.premiumUntil > new Date())
+      ? existing.premiumUntil.getTime()
+      : Date.now();
+    const premiumUntil = new Date(base + MS);
+
+    const updateDoc = { isPremium: true, premiumUntil, premiumTier: tier };
+    if (welcomeCoins > 0) updateDoc.coins = { increment: welcomeCoins };
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: updateDoc,
+      select: { id: true, username: true, isPremium: true, premiumUntil: true, premiumTier: true, coins: true }
+    });
+    res.json({ ok: true, user: { ...user, _id: user.id }, addedDays: days, tier, isBonus, coinsGiven: welcomeCoins });
+  } catch (err) { next(err); }
+}
+
+async function removePremium(req, res, next) {
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { isPremium: false, premiumUntil: null, premiumTier: 'free' },
+      select: { id: true, username: true, isPremium: true }
+    });
+    res.json({ ok: true, user: { ...user, _id: user.id } });
+  } catch (err) { next(err); }
+}
+
+async function giveCoins(req, res, next) {
+  try {
+    const { amount, reason = 'Admin sovg\'asi' } = req.body;
+    if (!amount || Number(amount) <= 0) {
+      return res.status(400).json({ error: 'amount > 0 bo\'lishi kerak' });
+    }
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { coins: { increment: Math.round(Number(amount)) } },
+      select: { id: true, username: true, coins: true }
+    });
+    res.json({ ok: true, username: user.username, coins: user.coins, given: Math.round(Number(amount)), reason });
+  } catch (err) { next(err); }
+}
+
+async function banUser(req, res, next) {
+  try {
+    const { banned } = req.body;
+    const reqUserId = req.user.id || req.user._id;
+    if (req.params.id === reqUserId.toString()) {
+      return res.status(400).json({ error: 'O\'zingizni ban qila olmaysiz' });
+    }
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { isBanned: Boolean(banned) },
+      select: { id: true, username: true, isBanned: true, socketId: true }
+    });
+
+    // Ban qilinayotgan user hozir online bo'lsa — socketini uzish
+    if (Boolean(banned) && user.socketId) {
+      const io = req.app.get('io');
+      const sock = io?.sockets?.sockets?.get(user.socketId);
+      if (sock) {
+        sock.emit('banned', { message: 'Akkaunt bloklangan' });
+        sock.disconnect(true);
+      }
+    }
+
+    res.json({ user: { _id: user.id, username: user.username, isBanned: user.isBanned } });
+  } catch (err) { next(err); }
+}
+
+async function toggleAdmin(req, res, next) {
+  try {
+    const reqUserId = req.user.id || req.user._id;
+    if (req.params.id === reqUserId.toString()) {
+      return res.status(400).json({ error: 'O\'z admin huquqingizni o\'zgartira olmaysiz' });
+    }
+    const { isAdmin } = req.body;
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { isAdmin: Boolean(isAdmin) },
+      select: { id: true, username: true, isAdmin: true }
+    });
+    res.json({ user: { ...user, _id: user.id } });
+  } catch (err) { next(err); }
+}
+
+async function deleteUser(req, res, next) {
+  try {
+    const reqUserId = req.user.id || req.user._id;
+    if (req.params.id === reqUserId.toString()) {
+      return res.status(400).json({ error: 'O\'zingizni o\'chira olmaysiz' });
+    }
+    const user = await prisma.user.delete({ where: { id: req.params.id } });
+
+    await Promise.all([
+      // Hududlarini o'chirish
+      prisma.territory.deleteMany({ where: { ownerId: req.params.id } }),
+      // Ogohlantirishlarini o'chirish
+      prisma.warning.deleteMany({ where: { userId: req.params.id } }),
+      // Jamoa a'zosi bo'lsa: memberCount va totalArea kamaytirish
+      user.teamId
+        ? prisma.team.update({
+            where: { id: user.teamId },
+            data: { memberCount: { decrement: 1 }, totalArea: { decrement: user.totalArea || 0 } }
+          })
+        : Promise.resolve(),
+      // Jamoa egasi bo'lsa ownerId ni null qilish
+      prisma.team.updateMany({ where: { ownerId: req.params.id }, data: { ownerId: null } }),
+    ]);
+
+    res.json({ message: 'O\'chirildi' });
+  } catch (err) { next(err); }
+}
+
+// ─── Territories ───────────────────────────────────────────────────────────────
+async function getTerritories(req, res, next) {
+  try {
+    const { page = 1, limit = 20, search = '' } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    let ownerFilter = {};
+    if (search) {
+      const matchedUsers = await prisma.user.findMany({
+        where: { username: { contains: search, mode: 'insensitive' } },
+        select: { id: true }
+      });
+      ownerFilter = { ownerId: { in: matchedUsers.map(u => u.id) } };
+    }
+
+    const [territories, total] = await Promise.all([
+      prisma.territory.findMany({
+        where: ownerFilter,
+        select: { id: true, ownerId: true, teamId: true, area: true, color: true, capturedAt: true, owner: { select: { username: true, color: true, level: true } }, team: { select: { name: true, tag: true } } },
+        orderBy: { capturedAt: 'desc' },
+        skip,
+        take: Number(limit)
+      }),
+      prisma.territory.count({ where: ownerFilter }),
+    ]);
+    
+    const mappedTerritories = territories.map(t => ({ ...t, _id: t.id }));
+    res.json({ territories: mappedTerritories, total, page: Number(page), limit: Number(limit) });
+  } catch (err) { next(err); }
+}
+
+async function deleteTerritory(req, res, next) {
+  try {
+    const territory = await prisma.territory.delete({ where: { id: req.params.id } });
+    await Promise.all([
+      prisma.user.update({
+        where: { id: territory.ownerId },
+        data: { totalArea: { decrement: territory.area }, territoriesCaptured: { decrement: 1 } }
+      }),
+      territory.teamId
+        ? prisma.team.update({
+            where: { id: territory.teamId },
+            data: { totalArea: { decrement: territory.area } }
+          })
+        : Promise.resolve(),
+    ]);
+    res.json({ message: 'O\'chirildi' });
+  } catch (err) { next(err); }
+}
+
+// ─── Teams ─────────────────────────────────────────────────────────────────────
+async function getTeams(req, res, next) {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+    const [teams, total] = await Promise.all([
+      prisma.team.findMany({
+        select: { id: true, name: true, tag: true, color: true, memberCount: true, totalArea: true, isPublic: true, createdAt: true, ownerId: true, owner: { select: { username: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: Number(limit)
+      }),
+      prisma.team.count(),
+    ]);
+    const mappedTeams = teams.map(t => ({ ...t, _id: t.id }));
+    res.json({ teams: mappedTeams, total, page: Number(page), limit: Number(limit) });
+  } catch (err) { next(err); }
+}
+
+async function deleteTeam(req, res, next) {
+  try {
+    const team = await prisma.team.delete({ where: { id: req.params.id } });
+    await prisma.user.updateMany({ where: { teamId: req.params.id }, data: { teamId: null } });
+    res.json({ message: 'O\'chirildi' });
+  } catch (err) { next(err); }
+}
+
+// ─── Events ────────────────────────────────────────────────────────────────────
+async function getEvents(req, res, next) {
+  try {
+    const { page = 1, limit = 50, type = '' } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+    const filter = type ? { type } : {};
+    const [events, total] = await Promise.all([
+      prisma.gameEvent.findMany({
+        where: filter,
+        include: { actor: { select: { username: true, color: true } }, target: { select: { username: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: Number(limit)
+      }),
+      prisma.gameEvent.count({ where: filter }),
+    ]);
+    const mappedEvents = events.map(e => ({ ...e, _id: e.id }));
+    res.json({ events: mappedEvents, total, page: Number(page), limit: Number(limit) });
+  } catch (err) { next(err); }
+}
+
+// ─── Online players ────────────────────────────────────────────────────────────
+async function getOnline(req, res, next) {
+  try {
+    const users = await prisma.user.findMany({
+      where: { isOnline: true, isAdmin: false },
+      select: { id: true, username: true, color: true, level: true, lastSeen: true }
+    });
+    const mappedUsers = users.map(u => ({ ...u, _id: u.id }));
+    res.json({ users: mappedUsers });
+  } catch (err) { next(err); }
+}
+
+// ─── Warnings ─────────────────────────────────────────────────────────────────
+async function getUserWarnings(req, res, next) {
+  try {
+    const warnings = await prisma.warning.findMany({
+      where: { userId: req.params.id },
+      include: { admin: { select: { username: true } } },
+      orderBy: { createdAt: 'desc' }
+    });
+    const mappedWarnings = warnings.map(w => ({ ...w, _id: w.id }));
+    res.json({ warnings: mappedWarnings });
+  } catch (err) { next(err); }
+}
+
+async function addWarning(req, res, next) {
+  try {
+    const { reason, severity = 'medium' } = req.body;
+    if (!reason?.trim()) return res.status(400).json({ error: 'reason majburiy' });
+    
+    const reqUserId = req.user.id || req.user._id;
+    const warning = await prisma.warning.create({
+      data: {
+        userId: req.params.id,
+        adminId: reqUserId.toString(),
+        reason: reason.trim(),
+        severity,
+      }
+    });
+    const count = await prisma.warning.count({ where: { userId: req.params.id } });
+    
+    // Auto-ban after 3 high severity warnings
+    if (severity === 'high' && count >= 3) {
+      await prisma.user.update({ where: { id: req.params.id }, data: { isBanned: true } });
+    }
+    res.json({ warning: { ...warning, _id: warning.id }, totalWarnings: count });
+  } catch (err) { next(err); }
+}
+
+async function deleteWarning(req, res, next) {
+  try {
+    await prisma.warning.delete({ where: { id: req.params.wid } });
+    res.json({ message: "O'chirildi" });
+  } catch (err) { next(err); }
+}
+
+async function getUserActivity(req, res, next) {
+  try {
+    const { limit = 30 } = req.query;
+    const events = await prisma.gameEvent.findMany({
+      where: { actorId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+      take: Number(limit)
+    });
+    const mappedEvents = events.map(e => ({ ...e, _id: e.id }));
+    res.json({ events: mappedEvents });
+  } catch (err) { next(err); }
+}
+
+// ─── Territory history ────────────────────────────────────────────────────────
+async function getTerritoryHistory(req, res, next) {
+  try {
+    const events = await prisma.gameEvent.findMany({
+      where: { territoryId: req.params.id },
+      include: { actor: { select: { username: true, color: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 50
+    });
+    const mappedEvents = events.map(e => ({ ...e, _id: e.id }));
+    res.json({ events: mappedEvents });
+  } catch (err) { next(err); }
+}
+
+// ─── Anti-Cheat ───────────────────────────────────────────────────────────────
+async function getAntiCheatLogs(req, res, next) {
+  try {
+    const { page = 1, limit = 50, type = '', userId = '' } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+    const filter = {};
+    if (type) filter.type = type;
+    if (userId) filter.userId = userId;
+
+    const [logs, total, typeCounts] = await Promise.all([
+      prisma.antiCheatLog.findMany({
+        where: filter,
+        include: { user: { select: { username: true, color: true, level: true } } },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: Number(limit)
+      }),
+      prisma.antiCheatLog.count({ where: filter }),
+      prisma.antiCheatLog.groupBy({
+        by: ['type'],
+        _sum: { count: true }
+      }),
+    ]);
+    
+    const typeCountMap = {};
+    typeCounts.forEach(t => { typeCountMap[t.type] = t._sum.count || 0; });
+    const mappedLogs = logs.map(l => ({ ...l, _id: l.id }));
+    
+    res.json({ logs: mappedLogs, total, typeCounts: typeCountMap, page: Number(page), limit: Number(limit) });
+  } catch (err) { next(err); }
+}
+
+async function getUserAntiCheat(req, res, next) {
+  try {
+    const logs = await prisma.antiCheatLog.findMany({
+      where: { userId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50
+    });
+    const mappedLogs = logs.map(l => ({ ...l, _id: l.id }));
+    res.json({ logs: mappedLogs });
+  } catch (err) { next(err); }
+}
+
+async function clearAntiCheatLogs(req, res, next) {
+  try {
+    const { type = '', userId = '' } = req.query;
+    const filter = {};
+    if (type) filter.type = type;
+    if (userId) filter.userId = userId;
+    const result = await prisma.antiCheatLog.deleteMany({ where: filter });
+    res.json({ deleted: result.count });
+  } catch (err) { next(err); }
+}
+
+// ─── Live Map ─────────────────────────────────────────────────────────────────
+async function getLiveMap(req, res, next) {
+  try {
+    const socketMap = getOnlinePlayers();
+
+    const [territories, recentLogs, onlineUsers, allEvents] = await Promise.all([
+      prisma.territory.findMany({
+        select: { id: true, ownerId: true, teamId: true, polygon: true, area: true, color: true, owner: { select: { username: true, color: true } } }
+      }),
+      prisma.antiCheatLog.findMany({
+        where: { createdAt: { gte: new Date(Date.now() - 3600000) }, lat: { not: null } },
+        include: { user: { select: { username: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 100
+      }),
+      prisma.user.findMany({
+        where: { isOnline: true, isAdmin: false },
+        select: { id: true, username: true, color: true, level: true, lastLocation: true }
+      }),
+      prisma.gameEvent.findMany({
+        where: { type: 'territory_captured', data: { not: null } },
+        select: { territoryId: true, data: true }
+      }),
+    ]);
+
+    // Hududlar zabt etilgan (stolenFrom bo'sh emas) — jang maydoni aniqlash
+    const hotspotIds = allEvents.filter(e => {
+       const d = e.data;
+       return d && Array.isArray(d.stolenFrom) && d.stolenFrom.length > 0;
+    }).map(e => e.territoryId);
+
+    const hotSet = new Set(hotspotIds.map(id => id?.toString()).filter(Boolean));
+
+    const players = onlineUsers.map(u => {
+      const userId = u.id.toString();
+      const live = socketMap[userId];
+      const liveLocation = (live?.lat != null && live?.lng != null)
+        ? { type: 'Point', coordinates: [live.lng, live.lat] }
+        : null;
+      return {
+        _id: userId,
+        username: u.username,
+        color: u.color,
+        level: u.level,
+        lastLocation: liveLocation || u.lastLocation || null,
+        isLive: liveLocation != null,
+      };
+    });
+
+    // Heatmap: hudud markazlari (centroid) + maydon intensivligi
+    const heatPoints = [];
+    for (const t of territories) {
+      const coords = t.polygon?.coordinates?.[0];
+      if (!coords || coords.length < 3) continue;
+      const n = coords.length;
+      const lng = coords.reduce((s, c) => s + c[0], 0) / n;
+      const lat = coords.reduce((s, c) => s + c[1], 0) / n;
+      heatPoints.push([lat, lng, Math.min(1, Math.max(0.1, (t.area || 100) / 20000))]);
+    }
+
+    const territoriesOut = territories.map(t => ({
+      ...t,
+      _id: t.id,
+      isHotspot: hotSet.has(t.id?.toString()),
+    }));
+
+    const mappedLogs = recentLogs.map(l => ({ ...l, _id: l.id }));
+    res.json({ players, territories: territoriesOut, suspiciousMarkers: mappedLogs, heatPoints });
+  } catch (err) { next(err); }
+}
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+async function getAnalytics(req, res, next) {
+  try {
+    const now   = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const week  = new Date(Date.now() -  7 * 86400000);
+    const month = new Date(Date.now() - 30 * 86400000);
+
+    // Ma'lumotlarni xotirada guruhlash uchun barcha mos yozuvlarni olamiz
+    const [
+      dauCount, wauCount, mauCount,
+      newUsersToday, newUsersWeek, newUsersMonth,
+      territoriesTotal, territoriesToday,
+      distanceResult, topPlayers,
+      recentEvents, recentUsersWeek, recentUsersMonth,
+      recentTerritories, topCoins,
+    ] = await Promise.all([
+      prisma.user.count({ where: { lastSeen: { gte: today }, isAdmin: false } }),
+      prisma.user.count({ where: { lastSeen: { gte: week }, isAdmin: false } }),
+      prisma.user.count({ where: { lastSeen: { gte: month }, isAdmin: false } }),
+      prisma.user.count({ where: { createdAt: { gte: today }, isAdmin: false } }),
+      prisma.user.count({ where: { createdAt: { gte: week }, isAdmin: false } }),
+      prisma.user.count({ where: { createdAt: { gte: month }, isAdmin: false } }),
+      prisma.territory.count(),
+      prisma.territory.count({ where: { capturedAt: { gte: today } } }),
+      prisma.user.aggregate({ _sum: { totalDistance: true } }),
+      prisma.user.findMany({
+        where: { isAdmin: false },
+        select: { id: true, username: true, color: true, level: true, xp: true, totalArea: true, totalDistance: true, territoriesCaptured: true, coins: true, isPremium: true, premiumTier: true },
+        orderBy: { xp: 'desc' },
+        take: 10
+      }),
+      prisma.gameEvent.findMany({ where: { createdAt: { gte: week } }, select: { createdAt: true } }),
+      prisma.user.findMany({ where: { createdAt: { gte: week }, isAdmin: false }, select: { createdAt: true } }),
+      prisma.user.findMany({ where: { createdAt: { gte: month }, isAdmin: false }, select: { createdAt: true } }),
+      prisma.territory.findMany({ where: { capturedAt: { gte: week } }, select: { capturedAt: true } }),
+      prisma.user.findMany({
+        where: { isAdmin: false },
+        select: { id: true, username: true, color: true, coins: true, isPremium: true, premiumTier: true },
+        orderBy: { coins: 'desc' },
+        take: 10
+      }),
+    ]);
+
+    const groupByDate = (arr, dateField) => {
+      const map = {};
+      for (const item of arr) {
+        const d = item[dateField].toISOString().split('T')[0];
+        map[d] = (map[d] || 0) + 1;
+      }
+      return Object.keys(map).sort().map(k => ({ _id: k, count: map[k] }));
+    };
+
+    const dailyEvents = groupByDate(recentEvents, 'createdAt');
+    const weeklyRegistrations = groupByDate(recentUsersWeek, 'createdAt');
+    const monthlyRegistrations = groupByDate(recentUsersMonth, 'createdAt');
+    const dailyTerritories = groupByDate(recentTerritories, 'capturedAt');
+
+    res.json({
+      dau: dauCount, wau: wauCount, mau: mauCount,
+      newUsersToday, newUsersWeek, newUsersMonth,
+      territoriesTotal, territoriesToday,
+      totalDistance: distanceResult._sum.totalDistance || 0,
+      topPlayers: topPlayers.map(p => ({ ...p, _id: p.id })),
+      topCoins: topCoins.map(p => ({ ...p, _id: p.id })),
+      dailyEvents, weeklyRegistrations, monthlyRegistrations, dailyTerritories,
+    });
+  } catch (err) { next(err); }
+}
+
+// ─── Economy ──────────────────────────────────────────────────────────────────
+async function getEconomy(req, res, next) {
+  try {
+    const now = new Date();
+    const week  = new Date(Date.now() -  7 * 86400000);
+    const month = new Date(Date.now() - 30 * 86400000);
+
+    const [
+      xpResult, coinsResult, topXp, topArea, topDist, topCoins,
+      premiumPro, premiumUltra, premiumNew7d, premiumNew30d,
+    ] = await Promise.all([
+      prisma.user.aggregate({ _sum: { xp: true } }),
+      prisma.user.aggregate({ _sum: { coins: true } }),
+      prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, level: true, xp: true, isPremium: true, premiumTier: true }, orderBy: { xp: 'desc' }, take: 20 }),
+      prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, totalArea: true, isPremium: true, premiumTier: true }, orderBy: { totalArea: 'desc' }, take: 10 }),
+      prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, totalDistance: true, isPremium: true, premiumTier: true }, orderBy: { totalDistance: 'desc' }, take: 10 }),
+      prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, coins: true, isPremium: true, premiumTier: true }, orderBy: { coins: 'desc' }, take: 10 }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro' } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra' } }),
+      prisma.user.count({ where: { isPremium: true, updatedAt: { gte: week } } }),
+      prisma.user.count({ where: { isPremium: true, updatedAt: { gte: month } } }),
+    ]);
+
+    const revSom   = premiumPro * 39900 + premiumUltra * 79900;
+    const revStars = premiumPro * 150   + premiumUltra * 300;
+
+    const mapIds = arr => arr.map(a => ({ ...a, _id: a.id }));
+
+    res.json({
+      totalXpDistributed:   xpResult._sum.xp  || 0,
+      totalCoinsCirculation: coinsResult._sum.coins || 0,
+      leaderboardXp:   mapIds(topXp),
+      leaderboardArea: mapIds(topArea),
+      leaderboardDist: mapIds(topDist),
+      leaderboardCoins: mapIds(topCoins),
+      premiumPro, premiumUltra,
+      premiumTotal:  premiumPro + premiumUltra,
+      premiumNew7d, premiumNew30d,
+      estimatedRevenueSom: revSom,
+      estimatedRevenueStars: revStars,
+    });
+  } catch (err) { next(err); }
+}
+
+async function seasonReset(req, res, next) {
+  try {
+    const { confirm } = req.body;
+    if (confirm !== 'SEASON_RESET') {
+      return res.status(400).json({ error: 'Tasdiqlash kodi noto\'g\'ri. "SEASON_RESET" yuboring' });
+    }
+    await Promise.all([
+      prisma.territory.deleteMany({}),
+      prisma.user.updateMany({
+        where: { isAdmin: false },
+        data: { xp: 0, level: 1, totalArea: 0, territoriesCaptured: 0, territoriesLost: 0 }
+      }),
+      prisma.team.updateMany({ data: { totalArea: 0 } }),
+    ]);
+    req.app.get('io')?.to('global').emit('season:reset', { message: 'Yangi mavsum boshlandi!' });
+    res.json({ message: 'Mavsum reset qilindi' });
+  } catch (err) { next(err); }
+}
+
+// ─── Admin o'z profili ─────────────────────────────────────────────────────────
+async function getMe(req, res, next) {
+  try {
+    const reqUserId = req.user.id || req.user._id;
+    const user = await prisma.user.findUnique({
+      where: { id: reqUserId.toString() },
+      select: { id: true, username: true, phone: true, color: true, xp: true, level: true, isAdmin: true, termsAccepted: true, createdAt: true }
+    });
+    res.json({ user: { ...user, _id: user.id } });
+  } catch (err) { next(err); }
+}
+
+async function updateMe(req, res, next) {
+  try {
+    const { username } = req.body;
+    if (!username?.trim()) return res.status(400).json({ error: 'username majburiy' });
+    const reqUserId = req.user.id || req.user._id;
+    
+    const taken = await prisma.user.findFirst({
+      where: { username: username.trim(), id: { not: reqUserId.toString() } }
+    });
+    if (taken) return res.status(409).json({ error: 'Bu username allaqachon band' });
+    
+    const user = await prisma.user.update({
+      where: { id: reqUserId.toString() },
+      data: { username: username.trim() },
+      select: { id: true, username: true }
+    });
+    res.json({ user: { ...user, _id: user.id } });
+  } catch (err) { next(err); }
+}
+
+async function verifyPassword(req, res, next) {
+  try {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'password majburiy' });
+    const reqUserId = req.user.id || req.user._id;
+    
+    const user = await prisma.user.findUnique({ where: { id: reqUserId.toString() } });
+    if (!user) return res.status(404).json({ error: 'Foydalanuvchi topilmadi' });
+    
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) return res.status(401).json({ error: 'Parol noto\'g\'ri' });
+    res.json({ valid: true });
+  } catch (err) { next(err); }
+}
+
+async function changePassword(req, res, next) {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword)
+      return res.status(400).json({ error: 'Barcha maydonlar majburiy' });
+    if (newPassword.length < 6)
+      return res.status(400).json({ error: 'Yangi parol kamida 6 ta belgi bo\'lishi kerak' });
+    
+    const reqUserId = req.user.id || req.user._id;
+    const user = await prisma.user.findUnique({ where: { id: reqUserId.toString() } });
+    if (!user) return res.status(404).json({ error: 'Foydalanuvchi topilmadi' });
+    
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) return res.status(401).json({ error: 'Joriy parol noto\'g\'ri' });
+    
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id: reqUserId.toString() },
+      data: { passwordHash }
+    });
+    res.json({ message: 'Parol muvaffaqiyatli yangilandi' });
+  } catch (err) { next(err); }
+}
+
+module.exports = {
+  getStats, getUsers, getUser, updateUser, banUser, toggleAdmin, deleteUser,
+  getUserWarnings, addWarning, deleteWarning, getUserActivity,
+  getTerritories, deleteTerritory, getTerritoryHistory,
+  getTeams, deleteTeam,
+  getEvents, getOnline,
+  getAntiCheatLogs, getUserAntiCheat, clearAntiCheatLogs,
+  getLiveMap,
+  getAnalytics,
+  getEconomy, seasonReset,
+  giveCoins, givePremium, removePremium,
+  getMe, updateMe, verifyPassword, changePassword,
+};

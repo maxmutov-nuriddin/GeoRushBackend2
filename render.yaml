@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: georush-backend
+    env: node
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 5000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: georush-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+
+databases:
+  - name: georush-db
+    databaseName: georush
+    user: georush
+    plan: free # Change to standard/pro later
+    region: frankfurt
