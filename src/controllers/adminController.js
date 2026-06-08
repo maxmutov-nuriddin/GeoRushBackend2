@@ -38,8 +38,8 @@ async function getStats(req, res, next) {
       prisma.user.count({ where: { createdAt: { gte: month }, isAdmin: false } }),
       // Premium statistika
       prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now } } }),
-      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro' } }),
-      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra' } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro', premiumIsGift: false } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra', premiumIsGift: false } }),
       prisma.user.count({ where: { isPremium: true, updatedAt: { gte: week } } }),
       prisma.user.count({ where: { isPremium: true, updatedAt: { gte: month } } }),
       // Coins iqtisodi
@@ -151,7 +151,7 @@ async function givePremium(req, res, next) {
       : Date.now();
     const premiumUntil = new Date(base + MS);
 
-    const updateDoc = { isPremium: true, premiumUntil, premiumTier: tier };
+    const updateDoc = { isPremium: true, premiumUntil, premiumTier: tier, premiumIsGift: isBonus };
     if (welcomeCoins > 0) updateDoc.coins = { increment: welcomeCoins };
 
     const user = await prisma.user.update({
@@ -167,7 +167,7 @@ async function removePremium(req, res, next) {
   try {
     const user = await prisma.user.update({
       where: { id: req.params.id },
-      data: { isPremium: false, premiumUntil: null, premiumTier: 'free' },
+      data: { isPremium: false, premiumUntil: null, premiumTier: 'free', premiumIsGift: false },
       select: { id: true, username: true, isPremium: true }
     });
     res.json({ ok: true, user: { ...user, _id: user.id } });
@@ -654,8 +654,8 @@ async function getEconomy(req, res, next) {
       prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, totalArea: true, isPremium: true, premiumTier: true }, orderBy: { totalArea: 'desc' }, take: 10 }),
       prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, totalDistance: true, isPremium: true, premiumTier: true }, orderBy: { totalDistance: 'desc' }, take: 10 }),
       prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, coins: true, isPremium: true, premiumTier: true }, orderBy: { coins: 'desc' }, take: 10 }),
-      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro' } }),
-      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra' } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro', premiumIsGift: false } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra', premiumIsGift: false } }),
       prisma.user.count({ where: { isPremium: true, updatedAt: { gte: week } } }),
       prisma.user.count({ where: { isPremium: true, updatedAt: { gte: month } } }),
     ]);

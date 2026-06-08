@@ -47,6 +47,7 @@ model User {
   isPremium           Boolean      @default(false)
   premiumUntil        DateTime?
   premiumTier         String       @default("free") // "free", "pro", "ultra"
+  premiumIsGift       Boolean      @default(false)
   telegramChatId      String?
 
   createdAt           DateTime     @default(now())
