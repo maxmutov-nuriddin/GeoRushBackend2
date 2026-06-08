@@ -68,6 +68,20 @@ function isActivePremium(u) {
   return !!(u && u.isPremium && u.premiumUntil && new Date() < new Date(u.premiumUntil));
 }
 
+function calculateSomPrice(tier, period, discountPct = 0) {
+  const basePrices = {
+    pro: { monthly: 39900, yearly: 399000 },
+    ultra: { monthly: 79900, yearly: 799000 },
+  };
+  const base = basePrices[tier]?.[period] || 39900;
+  if (!discountPct) return base;
+  return Math.max(1000, Math.round(base * (1 - discountPct / 100)));
+}
+
+function formatSom(amount) {
+  return amount.toLocaleString('uz-UZ').replace(/,/g, ' ');
+}
+
 // Stars invoice yuborish
 async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthly', promoCode = null) {
   if (!bot) throw new Error('Bot ishlamayapti');
@@ -77,9 +91,6 @@ async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthl
   const days = PREMIUM_DAYS[period] || 30;
   const welcomeCoins = tier === 'ultra' ? 1000 : 350;
   const periodLabel  = isYearly ? '12 oy (2 oy bepul!)' : '1 oy';
-  const priceLabel   = isYearly
-    ? (tier === 'ultra' ? '799 000 so\'m' : '399 000 so\'m')
-    : (tier === 'ultra' ? '79 900 so\'m'  : '39 900 so\'m');
 
   let promoDiscount = 0;
   if (promoCode) {
@@ -91,6 +102,12 @@ async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthl
       }
     }
   }
+
+  const baseAmount = calculateSomPrice(tier, period, 0);
+  const finalAmount = calculateSomPrice(tier, period, promoDiscount);
+  const priceLabel = promoDiscount > 0
+    ? `${formatSom(finalAmount)} so'm (chegirma bilan, aslida ${formatSom(baseAmount)} so'm)`
+    : `${formatSom(finalAmount)} so'm`;
 
   let description = tier === 'ultra'
     ? `👑 Qat'iy himoya  •  ⚡ 3x XP  •  🪙 1 000 coin + 2x bonus\n• Elite badge, skinlar bepul!\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`
@@ -184,19 +201,36 @@ async function initBot() {
     const RECEIPT_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 soat
 
     // ── Karta ma'lumotlarini yuboruvchi (hisob allaqachon ulangan) ────────────
-    async function sendCardInfo(chatId, tier = 'pro') {
+    async function sendCardInfo(chatId, tier = 'pro', period = 'monthly', promoCode = null) {
       const cardNumber = process.env.PREMIUM_CARD_NUMBER || 'Sozlanmagan';
       const cardOwner  = process.env.PREMIUM_CARD_OWNER  || 'Sozlanmagan';
-      const amount     = tier === 'ultra' ? '79900' : '39900';
+      
+      let promoDiscount = 0;
+      if (promoCode) {
+        const promo = await prisma.promoCode.findUnique({ where: { code: promoCode.toUpperCase() } });
+        if (promo && promo.isActive && new Date() <= promo.expiresAt) {
+          if (!promo.maxUses || promo.usesCount < promo.maxUses) {
+            promoDiscount = promo.discountPct;
+          }
+        }
+      }
+
+      const baseAmount = calculateSomPrice(tier, period, 0);
+      const finalAmount = calculateSomPrice(tier, period, promoDiscount);
+      const periodLabel = period === 'yearly' ? 'Yillik (12 oy)' : 'Oylik (1 oy)';
 
       const lines = [
         `💎 GeoRush Premium ${tier.toUpperCase()} — Obuna`,
+        `Tarif davri: ${periodLabel}`,
+        promoDiscount > 0 ? `Promokod: ${promoCode.toUpperCase()} (-${promoDiscount}%)` : null,
         '',
         'To\'lov ma\'lumotlari:',
         '',
         `Karta raqami: ${cardNumber}`,
         `Egasi: ${cardOwner}`,
-        `Summa: ${Number(amount).toLocaleString('ru-RU')} so\'m`,
+        promoDiscount > 0 
+          ? `Summa: ~${formatSom(baseAmount)}~ *${formatSom(finalAmount)} so'm*`
+          : `Summa: *${formatSom(finalAmount)} so'm*`,
         '',
         'Qadamlar:',
         '1. Kartaga pul o\'tkazing',
@@ -204,19 +238,20 @@ async function initBot() {
         '3. Admin 24 soat ichida Premium ni yoqadi',
         '',
         'Bu xabar 15 daqiqadan so\'ng o\'chib ketadi',
-      ];
+      ].filter(l => l !== null);
 
       let sentMsg;
       try {
-        sentMsg = await bot.sendMessage(chatId, lines.join('\n'));
-        logger.info(`Obuna karta yuborildi: chatId=${chatId}, tier=${tier}`);
+        sentMsg = await bot.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
+        logger.info(`Obuna karta yuborildi: chatId=${chatId}, tier=${tier}, period=${period}, promoCode=${promoCode}`);
       } catch (err) {
         logger.error('Karta yuborishda xato:', err.message);
         try { await bot.sendMessage(chatId, 'Xatolik yuz berdi. Keyinroq urinib koring.'); } catch {}
         return;
       }
 
-      await setPending(chatId, `pendingReceipt:${tier}`, RECEIPT_WINDOW_MS);
+      const typeKey = `pendingReceipt:${tier}:${period}:${promoCode || ''}`;
+      await setPending(chatId, typeKey, RECEIPT_WINDOW_MS);
 
       // 15 daqiqada karta xabarini o'chirish
       setTimeout(async () => {
@@ -230,7 +265,7 @@ async function initBot() {
     }
 
     // ── /obuna — hisob ulanganmi tekshiradi, yo'q bo'lsa telefon so'raydi ────
-    async function sendObuna(chatId, tier = 'pro') {
+    async function sendObuna(chatId, tier = 'pro', period = 'monthly', promoCode = null) {
       const strChatId = String(chatId);
       try {
         const linked = await prisma.user.findFirst({
@@ -239,10 +274,11 @@ async function initBot() {
         });
         if (linked) {
           // Hisob ulangan — karta yuboramiz
-          await sendCardInfo(chatId, tier);
+          await sendCardInfo(chatId, tier, period, promoCode);
         } else {
           // Hisob ulanmagan — avval telefon so'raymiz
-          await setPending(chatId, `pendingObuna_${tier}`, RECEIPT_WINDOW_MS);
+          const typeKey = `pendingObuna:${tier}:${period}:${promoCode || ''}`;
+          await setPending(chatId, typeKey, RECEIPT_WINDOW_MS);
           await bot.sendMessage(chatId,
             `Obuna (${tier.toUpperCase()}) uchun ilovadagi hisobingizni tasdiqlash kerak.\nTelefon raqamingizni ulashing:`,
             {
@@ -261,7 +297,7 @@ async function initBot() {
     }
 
     // ── Chek rasmini qabul qilib adminга yuboruvchi funksiya ─────────────────
-    async function handleReceipt(msg, tier = 'pro') {
+    async function handleReceipt(msg, tier = 'pro', period = 'monthly', promoCode = null) {
       const chatId  = String(msg.chat.id);
       const adminId = process.env.PREMIUM_ADMIN_TG_ID;
 
@@ -281,6 +317,19 @@ async function initBot() {
 
       const vaqt = new Date().toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' });
 
+      let promoDiscount = 0;
+      if (promoCode) {
+        const promo = await prisma.promoCode.findUnique({ where: { code: promoCode.toUpperCase() } });
+        if (promo && promo.isActive && new Date() <= promo.expiresAt) {
+          if (!promo.maxUses || promo.usesCount < promo.maxUses) {
+            promoDiscount = promo.discountPct;
+          }
+        }
+      }
+
+      const finalAmount = calculateSomPrice(tier, period, promoDiscount);
+      const periodLabel = period === 'yearly' ? 'YILLIK (12 oy)' : 'OYLIK (1 oy)';
+
       // Adminга rasm + to'liq ma'lumot
       if (adminId) {
         try {
@@ -291,10 +340,12 @@ async function initBot() {
             `Ism (ilova): ${username}`,
             `Telefon:     ${phone}`,
             `Vaqt:        ${vaqt}`,
-            `Tarif:       ${tier.toUpperCase()}`,
+            `Tarif:       ${tier.toUpperCase()} (${periodLabel})`,
+            `To'lov summasi: ${formatSom(finalAmount)} so'm`,
+            promoCode ? `Promokod:    ${promoCode.toUpperCase()} (-${promoDiscount}%)` : null,
             '',
-            `Premium yoqish: Admin panel > Users > 💎 (Tanlangan: ${tier.toUpperCase()})`,
-          ].join('\n');
+            `Premium yoqish: Admin panel > Users > 💎 (Tanlangan: ${tier.toUpperCase()}, Davomiyligi: ${periodLabel})`,
+          ].filter(l => l !== null).join('\n');
 
           await bot.sendPhoto(adminId, fileId, { caption });
           logger.info(`Chek adminga yuborildi: chatId=${chatId}, user=${username}, tier=${tier}`);
@@ -305,25 +356,34 @@ async function initBot() {
 
       // Foydalanuvchiga tasdiqlash
       await bot.sendMessage(msg.chat.id,
-        `Chekingiz qabul qilindi!\nAdmin 24 soat ichida Premium (${tier.toUpperCase()}) ni yoqadi.`
+        `Chekingiz qabul qilindi!\nAdmin 24 soat ichida Premium (${tier.toUpperCase()}, ${periodLabel}) ni yoqadi.`
       ).catch(() => {});
 
-      await delPending(chatId, `pendingReceipt:${tier}`);
-      await delPending(chatId, 'pendingReceipt');
+      // Hamma kutilayotgan receipt sessiyalarni o'chiramiz
+      await prisma.botSession.deleteMany({
+        where: {
+          chatId: String(chatId),
+          type: { startsWith: 'pendingReceipt' }
+        }
+      }).catch(() => {});
     }
 
     // ── /start obuna ─────────────────────────────────────────────────────────
-    bot.onText(/\/start obuna(?:_(pro|ultra))?/, async (msg, match) => {
-      const tier = match[1] || 'pro';
-      logger.info(`Bot /start obuna: chatId=${msg.chat.id}, tier=${tier}`);
-      await sendObuna(msg.chat.id, tier);
+    bot.onText(/\/start obuna(?:_([a-zA-Z0-9]+))?(?:_([a-zA-Z0-9]+))?(?:_([a-zA-Z0-9]+))?/, async (msg, match) => {
+      const tier      = match[1] || 'pro';
+      const period    = match[2] || 'monthly';
+      const promoCode = match[3] || null;
+      logger.info(`Bot /start obuna: chatId=${msg.chat.id}, tier=${tier}, period=${period}, promoCode=${promoCode}`);
+      await sendObuna(msg.chat.id, tier, period, promoCode);
     });
 
     // ── /obuna — to'g'ridan-to'g'ri komanda (bot avval start qilingan bo'lsa) ─
-    bot.onText(/^\/obuna(?:_(pro|ultra))?/, async (msg, match) => {
-      const tier = match[1] || 'pro';
-      logger.info(`Bot /obuna komandasi: chatId=${msg.chat.id}, tier=${tier}`);
-      await sendObuna(msg.chat.id, tier);
+    bot.onText(/^\/obuna(?:_([a-zA-Z0-9]+))?(?:_([a-zA-Z0-9]+))?(?:_([a-zA-Z0-9]+))?/, async (msg, match) => {
+      const tier      = match[1] || 'pro';
+      const period    = match[2] || 'monthly';
+      const promoCode = match[3] || null;
+      logger.info(`Bot /obuna komandasi: chatId=${msg.chat.id}, tier=${tier}, period=${period}, promoCode=${promoCode}`);
+      await sendObuna(msg.chat.id, tier, period, promoCode);
     });
 
     // ── /start TOKEN — OTP ro'yxatdan o'tish ──────────────────────────────────
