@@ -5,6 +5,7 @@ const { validationResult } = require('express-validator');
 const { prisma } = require('../config/database');
 const { recordFailedAttempt, recordSuccess, getIp } = require('../middleware/ipBlocker');
 const { tierOf, entitlementsPublic } = require('../config/tiers');
+const logger = require('../utils/logger');
 
 function generateToken(userId, username) {
   return jwt.sign({ userId, username }, process.env.JWT_SECRET, {
@@ -126,6 +127,11 @@ async function requestOtp(req, res, next) {
 
     const botLink = `https://t.me/${botUsername}?start=${token}`;
     const tgLink  = `tg://resolve?domain=${botUsername}&start=${token}`;
+
+    if (process.env.NODE_ENV === 'development') {
+      logger.info(`[DEV] OTP Code for ${normalized}: ${otp}`);
+      logger.info(`[DEV] Bot Link: ${botLink}`);
+    }
 
     res.json({ token, botLink, tgLink });
   } catch (err) { next(err); }
