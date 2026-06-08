@@ -55,4 +55,10 @@ router.delete('/teams/:id',               c.deleteTeam);
 // ─── Events ───────────────────────────────────────────────────────────────────
 router.get('/events',                      c.getEvents);
 
+// ─── Promo Codes ──────────────────────────────────────────────────────────────
+const p = require('../controllers/promoController');
+router.post('/promocodes',                 p.createPromoCode);
+router.get('/promocodes',                  p.getPromoCodes);
+router.delete('/promocodes/:id',           p.deletePromoCode);
+
 module.exports = router;

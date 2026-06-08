@@ -69,30 +69,45 @@ function isActivePremium(u) {
 }
 
 // Stars invoice yuborish
-async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthly') {
+async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthly', promoCode = null) {
   if (!bot) throw new Error('Bot ishlamayapti');
   const isYearly = period === 'yearly';
   const starKey  = isYearly ? `${tier}_yearly` : tier;
-  const starsAmount = TIER_STARS[starKey] || 150;
+  let finalStars = TIER_STARS[starKey] || 150;
   const days = PREMIUM_DAYS[period] || 30;
-  const welcomeCoins = tier === 'ultra' ? 7500 : 2500;
+  const welcomeCoins = tier === 'ultra' ? 1000 : 350;
   const periodLabel  = isYearly ? '12 oy (2 oy bepul!)' : '1 oy';
   const priceLabel   = isYearly
     ? (tier === 'ultra' ? '799 000 so\'m' : '399 000 so\'m')
     : (tier === 'ultra' ? '79 900 so\'m'  : '39 900 so\'m');
 
-  const description = tier === 'ultra'
-    ? `👑 Qat'iy himoya  •  ⚡ 3x XP  •  🪙 7 500 coin + 2x bonus\n• Elite badge, skinlar bepul!\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`
-    : `💎 Hudud himoyasi  •  ⚡ 2x XP  •  🪙 2 500 coin + 1.5x bonus\n• Premium badge\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`;
+  let promoDiscount = 0;
+  if (promoCode) {
+    const promo = await prisma.promoCode.findUnique({ where: { code: promoCode.toUpperCase() } });
+    if (promo && promo.isActive && new Date() <= promo.expiresAt) {
+      if (!promo.maxUses || promo.usesCount < promo.maxUses) {
+        promoDiscount = promo.discountPct;
+        finalStars = Math.max(1, Math.round(finalStars * (1 - promoDiscount / 100)));
+      }
+    }
+  }
+
+  let description = tier === 'ultra'
+    ? `👑 Qat'iy himoya  •  ⚡ 3x XP  •  🪙 1 000 coin + 2x bonus\n• Elite badge, skinlar bepul!\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`
+    : `💎 Hudud himoyasi  •  ⚡ 2x XP  •  🪙 350 coin + 1.5x bonus\n• Premium badge\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`;
+
+  if (promoDiscount > 0) {
+    description += `\n\n🎟 Promokod (${promoCode}): -${promoDiscount}% CHEGIRMA!`;
+  }
 
   await bot.sendInvoice(
     chatId,
     `GeoRush ${tier.toUpperCase()} — ${periodLabel}`,
     description,
-    JSON.stringify({ userId, type: PREMIUM_PAYLOAD, tier, period }),
+    JSON.stringify({ userId, type: PREMIUM_PAYLOAD, tier, period, promoCode }),
     '',
     'XTR',
-    [{ label: `GeoRush Premium ${tier.toUpperCase()} (${periodLabel})`, amount: starsAmount }],
+    [{ label: `GeoRush Premium ${tier.toUpperCase()} (${periodLabel})`, amount: finalStars }],
   );
 }
 
@@ -107,11 +122,19 @@ async function handleSuccessfulPayment(msg) {
   const tier   = payload.tier   || 'pro';
   const period = payload.period || 'monthly';
   const days   = PREMIUM_DAYS[period] || 30;
-  const coinsBonus = tier === 'ultra' ? 7500 : 2500;
+  const promoCode = payload.promoCode;
+  const coinsBonus = tier === 'ultra' ? 1000 : 350;
   const xpMult     = tier === 'ultra' ? '3x' : '2x';
   const periodLabel = period === 'yearly' ? '12 oy (365 kun)' : '30 kun';
 
   try {
+    if (promoCode) {
+      await prisma.promoCode.updateMany({
+        where: { code: promoCode.toUpperCase() },
+        data: { usesCount: { increment: 1 } }
+      }).catch(() => {});
+    }
+
     const premiumUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
     await prisma.user.update({
       where: { id: payload.userId },

@@ -5,6 +5,8 @@ const {
   getShopItems, getMyShop, buyItem, equipItem, unequipItem, dailyClaim,
 } = require('../controllers/shopController');
 
+const p = require('../controllers/promoController');
+
 router.use(authenticate);
 
 router.get('/items',    getShopItems);
@@ -13,5 +15,6 @@ router.post('/buy',     [body('itemId').trim().notEmpty()], buyItem);
 router.post('/equip',   [body('itemId').trim().notEmpty()], equipItem);
 router.post('/unequip', unequipItem);
 router.post('/daily',   dailyClaim);
+router.post('/promocode/check', [body('code').trim().notEmpty()], p.checkPromoCode);
 
 module.exports = router;

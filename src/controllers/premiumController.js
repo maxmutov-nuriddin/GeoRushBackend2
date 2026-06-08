@@ -40,7 +40,9 @@ async function sendInvoice(req, res, next) {
 
     const tier   = req.body.tier   || 'pro';
     const period = req.body.period || 'monthly'; // 'monthly' | 'yearly'
-    await sendPremiumInvoice(user.telegramChatId, req.user.id, tier, period);
+    const promoCode = req.body.promoCode || null;
+
+    await sendPremiumInvoice(user.telegramChatId, req.user.id, tier, period, promoCode);
     res.json({ ok: true, message: 'Invoice Telegram ga yuborildi' });
   } catch (err) { next(err); }
 }
