@@ -7,7 +7,7 @@ async function getStatus(req, res, next) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { isPremium: true, premiumUntil: true, premiumTier: true, telegramChatId: true, coins: true }
+      select: { isPremium: true, premiumUntil: true, premiumTier: true, telegramChatId: true, coins: true, createdAt: true }
     });
 
     const active = !!(user.isPremium && user.premiumUntil && new Date() < new Date(user.premiumUntil));
@@ -19,6 +19,7 @@ async function getStatus(req, res, next) {
       entitlements:   entitlementsPublic(tier),
       hasTelegramLink: !!user.telegramChatId,
       coins:          user.coins || 0,
+      createdAt:      user.createdAt,
     });
   } catch (err) { next(err); }
 }

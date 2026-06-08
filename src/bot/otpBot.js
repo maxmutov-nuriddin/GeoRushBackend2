@@ -92,20 +92,34 @@ async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthl
   const welcomeCoins = tier === 'ultra' ? 1000 : 350;
   const periodLabel  = isYearly ? '12 oy (2 oy bepul!)' : '1 oy';
 
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { createdAt: true }
+  });
+  const isWelcomeActive = user && (Date.now() - new Date(user.createdAt).getTime()) < 10 * 60 * 1000;
+  let welcomeDiscount = 0;
+  if (isWelcomeActive) {
+    welcomeDiscount = 30;
+  }
+
   let promoDiscount = 0;
   if (promoCode) {
     const promo = await prisma.promoCode.findUnique({ where: { code: promoCode.toUpperCase() } });
     if (promo && promo.isActive && new Date() <= promo.expiresAt) {
       if (!promo.maxUses || promo.usesCount < promo.maxUses) {
         promoDiscount = promo.discountPct;
-        finalStars = Math.max(1, Math.round(finalStars * (1 - promoDiscount / 100)));
       }
     }
   }
 
+  const effectiveDiscount = Math.max(welcomeDiscount, promoDiscount);
+  if (effectiveDiscount > 0) {
+    finalStars = Math.max(1, Math.round(finalStars * (1 - effectiveDiscount / 100)));
+  }
+
   const baseAmount = calculateSomPrice(tier, period, 0);
-  const finalAmount = calculateSomPrice(tier, period, promoDiscount);
-  const priceLabel = promoDiscount > 0
+  const finalAmount = calculateSomPrice(tier, period, effectiveDiscount);
+  const priceLabel = effectiveDiscount > 0
     ? `${formatSom(finalAmount)} so'm (chegirma bilan, aslida ${formatSom(baseAmount)} so'm)`
     : `${formatSom(finalAmount)} so'm`;
 
@@ -113,7 +127,9 @@ async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthl
     ? `👑 Qat'iy himoya  •  ⚡ 3x XP  •  🪙 1 000 coin + 2x bonus\n• Elite badge, skinlar bepul!\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`
     : `💎 Hudud himoyasi  •  ⚡ 2x XP  •  🪙 350 coin + 1.5x bonus\n• Premium badge\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`;
 
-  if (promoDiscount > 0) {
+  if (isWelcomeActive && welcomeDiscount >= promoDiscount) {
+    description += `\n\n🎁 Birinchi ro'yxatdan o'tganingiz uchun 30% start chegirmasi qo'llandi!`;
+  } else if (promoDiscount > 0) {
     description += `\n\n🎟 Promokod (${promoCode}): -${promoDiscount}% CHEGIRMA!`;
   }
 
@@ -205,6 +221,16 @@ async function initBot() {
       const cardNumber = process.env.PREMIUM_CARD_NUMBER || 'Sozlanmagan';
       const cardOwner  = process.env.PREMIUM_CARD_OWNER  || 'Sozlanmagan';
       
+      const user = await prisma.user.findFirst({
+        where: { telegramChatId: String(chatId) },
+        select: { createdAt: true }
+      });
+      const isWelcomeActive = user && (Date.now() - new Date(user.createdAt).getTime()) < 10 * 60 * 1000;
+      let welcomeDiscount = 0;
+      if (isWelcomeActive) {
+        welcomeDiscount = 30;
+      }
+
       let promoDiscount = 0;
       if (promoCode) {
         const promo = await prisma.promoCode.findUnique({ where: { code: promoCode.toUpperCase() } });
@@ -215,20 +241,23 @@ async function initBot() {
         }
       }
 
+      const finalDiscount = Math.max(welcomeDiscount, promoDiscount);
       const baseAmount = calculateSomPrice(tier, period, 0);
-      const finalAmount = calculateSomPrice(tier, period, promoDiscount);
+      const finalAmount = calculateSomPrice(tier, period, finalDiscount);
       const periodLabel = period === 'yearly' ? 'Yillik (12 oy)' : 'Oylik (1 oy)';
 
       const lines = [
         `💎 GeoRush Premium ${tier.toUpperCase()} — Obuna`,
         `Tarif davri: ${periodLabel}`,
-        promoDiscount > 0 ? `Promokod: ${promoCode.toUpperCase()} (-${promoDiscount}%)` : null,
+        isWelcomeActive && welcomeDiscount >= promoDiscount
+          ? `Start chegirma: Birinchi ro'yxatdan o'tganingiz uchun (-30%)`
+          : promoDiscount > 0 ? `Promokod: ${promoCode.toUpperCase()} (-${promoDiscount}%)` : null,
         '',
         'To\'lov ma\'lumotlari:',
         '',
         `Karta raqami: ${cardNumber}`,
         `Egasi: ${cardOwner}`,
-        promoDiscount > 0 
+        finalDiscount > 0 
           ? `Summa: ~${formatSom(baseAmount)}~ *${formatSom(finalAmount)} so'm*`
           : `Summa: *${formatSom(finalAmount)} so'm*`,
         '',
@@ -297,25 +326,34 @@ async function initBot() {
     }
 
     // ── Chek rasmini qabul qilib adminга yuboruvchi funksiya ─────────────────
-    async function handleReceipt(msg, tier = 'pro', period = 'monthly', promoCode = null) {
+    async function handleReceipt(msg, tier = 'pro', period = 'monthly', promoCode = null, sessionCreatedAt = null) {
       const chatId  = String(msg.chat.id);
       const adminId = process.env.PREMIUM_ADMIN_TG_ID;
 
       // Foydalanuvchi ma'lumotlarini DB dan olamiz
       let username = '—';
       let phone    = '—';
+      let createdAt = null;
       try {
         const user = await prisma.user.findFirst({
           where: { telegramChatId: chatId },
-          select: { username: true, phone: true }
+          select: { username: true, phone: true, createdAt: true }
         });
         if (user) {
           username = user.username || '—';
           phone    = user.phone    || '—';
+          createdAt = user.createdAt;
         }
       } catch {}
 
       const vaqt = new Date().toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' });
+
+      const refTime = sessionCreatedAt ? new Date(sessionCreatedAt).getTime() : Date.now();
+      const isWelcomeActive = createdAt && (refTime - new Date(createdAt).getTime()) < 10 * 60 * 1000;
+      let welcomeDiscount = 0;
+      if (isWelcomeActive) {
+        welcomeDiscount = 30;
+      }
 
       let promoDiscount = 0;
       if (promoCode) {
@@ -327,7 +365,8 @@ async function initBot() {
         }
       }
 
-      const finalAmount = calculateSomPrice(tier, period, promoDiscount);
+      const finalDiscount = Math.max(welcomeDiscount, promoDiscount);
+      const finalAmount = calculateSomPrice(tier, period, finalDiscount);
       const periodLabel = period === 'yearly' ? 'YILLIK (12 oy)' : 'OYLIK (1 oy)';
 
       // Adminга rasm + to'liq ma'lumot
@@ -342,7 +381,9 @@ async function initBot() {
             `Vaqt:        ${vaqt}`,
             `Tarif:       ${tier.toUpperCase()} (${periodLabel})`,
             `To'lov summasi: ${formatSom(finalAmount)} so'm`,
-            promoCode ? `Promokod:    ${promoCode.toUpperCase()} (-${promoDiscount}%)` : null,
+            isWelcomeActive && welcomeDiscount >= promoDiscount
+              ? `Chegirma:    10 daqiqalik start chegirmasi (-30%)`
+              : promoCode ? `Promokod:    ${promoCode.toUpperCase()} (-${promoDiscount}%)` : null,
             '',
             `Premium yoqish: Admin panel > Users > 💎 (Tanlangan: ${tier.toUpperCase()}, Davomiyligi: ${periodLabel})`,
           ].filter(l => l !== null).join('\n');
@@ -510,17 +551,20 @@ async function initBot() {
 
       // Chek rasmi — faqat obuna kutilayotgan foydalanuvchidan
       if (msg.photo) {
-        let pendingTier = null;
-        if (await hasPending(chatId, 'pendingReceipt:pro')) {
-          pendingTier = 'pro';
-        } else if (await hasPending(chatId, 'pendingReceipt:ultra')) {
-          pendingTier = 'ultra';
-        } else if (await hasPending(chatId, 'pendingReceipt')) {
-          pendingTier = 'pro';
-        }
+        const session = await prisma.botSession.findFirst({
+          where: {
+            chatId: String(chatId),
+            type: { startsWith: 'pendingReceipt:' },
+            expiresAt: { gt: new Date() },
+          }
+        }).catch(() => null);
 
-        if (pendingTier) {
-          return handleReceipt(msg, pendingTier);
+        if (session) {
+          const parts = session.type.split(':');
+          const tier = parts[1] || 'pro';
+          const period = parts[2] || 'monthly';
+          const promoCode = parts[3] || null;
+          return handleReceipt(msg, tier, period, promoCode, session.createdAt);
         }
         return bot.sendMessage(msg.chat.id,
           'Rasm qabul qilindi.\nAgar obuna uchun chek yuborayotgan bo\'lsangiz, avval /obuna komandasini yuboring.'
@@ -616,19 +660,25 @@ async function initBot() {
       }
 
       // /obuna oqimi — hisob ulash va karta yuborish
-      let pendingTier = null;
-      if (await hasPending(chatId, 'pendingObuna_pro')) {
-        pendingTier = 'pro';
-        await delPending(chatId, 'pendingObuna_pro');
-      } else if (await hasPending(chatId, 'pendingObuna_ultra')) {
-        pendingTier = 'ultra';
-        await delPending(chatId, 'pendingObuna_ultra');
-      } else if (await hasPending(chatId, 'pendingObuna')) {
-        pendingTier = 'pro';
-        await delPending(chatId, 'pendingObuna');
-      }
+      const obunaSession = await prisma.botSession.findFirst({
+        where: {
+          chatId: String(chatId),
+          type: { startsWith: 'pendingObuna:' },
+          expiresAt: { gt: new Date() },
+        }
+      }).catch(() => null);
 
-      if (pendingTier) {
+      if (obunaSession) {
+        const parts = obunaSession.type.split(':');
+        const tier = parts[1] || 'pro';
+        const period = parts[2] || 'monthly';
+        const promoCode = parts[3] || null;
+
+        // Delete this session
+        await prisma.botSession.delete({
+          where: { chatId_type: { chatId: String(chatId), type: obunaSession.type } }
+        }).catch(() => {});
+
         try {
           const userFound = await prisma.user.findUnique({
             where: { phone: incomingPhone },
@@ -646,7 +696,7 @@ async function initBot() {
               `Hisob tasdiqlandi, ${user.username}!\nKarta ma'lumotlari yuborilmoqda...`,
               { reply_markup: { remove_keyboard: true } }
             );
-            await sendCardInfo(chatId, pendingTier);
+            await sendCardInfo(chatId, tier, period, promoCode);
           } else {
             await bot.sendMessage(chatId,
               'Bu raqam ilovada topilmadi.\nAvval ilovadan ro\'yxatdan o\'ting.',
