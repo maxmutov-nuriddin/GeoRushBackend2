@@ -59,6 +59,7 @@ router.get('/events',                      c.getEvents);
 const p = require('../controllers/promoController');
 router.post('/promocodes',                 p.createPromoCode);
 router.get('/promocodes',                  p.getPromoCodes);
+router.patch('/promocodes/:id',            p.togglePromoCode);
 router.delete('/promocodes/:id',           p.deletePromoCode);
 
 module.exports = router;
