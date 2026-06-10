@@ -35,4 +35,11 @@ module.exports = {
   AUTH_RATE_LIMIT_WINDOW_MS: 15 * 60 * 1000,
   AUTH_RATE_LIMIT_MAX: 20,
   LOCATION_UPDATE_RATE_MS: parseInt(process.env.LOCATION_UPDATE_INTERVAL_MS || '2000'),
+
+  // Lokatsiyani DB'ga yozish oralig'i (har user uchun). Masofa xotirada to'planadi va
+  // shu oraliqda BIR marta yoziladi. Avval ~6s'da bir yozilardi (har 3 nuqta) →
+  // 15s'da DB-zapros ~2.5x kamayadi; env orqali 30000 qilsa ~5x kamayadi.
+  // Uzilishda va SIGTERM'da qolgan masofa baribir yoziladi (yo'qotish yo'q).
+  // Live xarita pozitsiyani xotiradan (socket) oladi — DB yangiligi 15s bo'lishi yetarli.
+  LOCATION_PERSIST_INTERVAL_MS: parseInt(process.env.LOCATION_PERSIST_INTERVAL_MS || '15000'),
 };

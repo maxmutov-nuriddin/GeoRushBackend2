@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { validationResult } = require('express-validator');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+// Umumiy (yagona) Prisma instansi — ulanish pulini tejaydi (alohida client emas).
+const { prisma } = require('../config/database');
 const { getIo } = require('../socket/ioInstance');
 const { tierOf, entitlements } = require('../config/tiers');
 

@@ -1,9 +1,8 @@
 const TelegramBot  = require('node-telegram-bot-api');
 const crypto       = require('crypto');
-const { PrismaClient } = require('@prisma/client');
 const logger       = require('../utils/logger');
-
-const prisma = new PrismaClient();
+// Umumiy (yagona) Prisma instansi — alohida client ochmaymiz (ulanishlarni tejaymiz).
+const { prisma }   = require('../config/database');
 
 // DB-backed yordamchi funksiyalar (server restart bo'lsa ham saqlanadi)
 async function setPending(chatId, type, windowMs) {

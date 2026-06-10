@@ -97,6 +97,7 @@ function handleLocation(io, socket, onlinePlayers) {
   const { userId } = socket;
   let lastUpdateTime = 0;
   let lastValidPoint = null;
+  let lastPersistTime = 0; // shu ulanish uchun oxirgi DB-yozuv vaqti (throttle)
 
   socket.on('location:update', async (data) => {
     const now = Date.now();
@@ -197,11 +198,15 @@ function handleLocation(io, socket, onlinePlayers) {
       trail.splice(1, trail.length - constants.MAX_TRAIL_POINTS);
     }
 
-    // Persist location + accumulated distance every 3 updates (reduced from 10 to limit data loss on crash)
-    if (trail.length % 3 === 0) {
+    // Lokatsiya + to'plangan masofani DB'ga vaqt bo'yicha yozamiz (har N soniyada bir marta).
+    // Avval har 3 nuqtada yozilardi (~6s) — endi LOCATION_PERSIST_INTERVAL_MS (15s).
+    // Masofa pendingDistance'da to'planib turadi, shuning uchun kamroq yozsak ham yo'qolmaydi;
+    // uzilish va SIGTERM'da qolgani baribir flush qilinadi.
+    if (now - lastPersistTime >= constants.LOCATION_PERSIST_INTERVAL_MS) {
+      lastPersistTime = now;
       const distToFlush = pendingDistance.get(userId) || 0;
       pendingDistance.set(userId, 0);
-      
+
       const updateData = {
         lastLocation: { type: 'Point', coordinates: [lng, lat] },
         lastSeen: new Date(),

@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+// Umumiy (yagona) Prisma instansi — har modulda alohida `new PrismaClient()` ulanish
+// pulini ko'paytirib, ko'p foydalanuvchida ulanishlarni tugatadi. Bitta pool ishlatamiz.
+const { prisma } = require('../config/database');
 const { getOnlinePlayers } = require('../socket/index');
 const { TIERS } = require('../config/tiers');
 
