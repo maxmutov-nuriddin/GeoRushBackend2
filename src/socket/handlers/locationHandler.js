@@ -13,6 +13,16 @@ const pendingDistance = new Map(); // userId -> accumulated meters (not yet flus
 // Hot path'da: har user uchun 30s throttle + best-effort (xato bo'lsa jim o'tadi).
 const lastProximityAt = new Map();   // userId -> ts
 const proximityNotified = new Map(); // `${ownerId}:${attackerId}` -> ts
+const PROXIMITY_TTL_MS = 5 * 60 * 1000;
+
+// proximityNotified juftlik-kalitlari disconnect'da tozalanmaydi — chegaradan oshsa
+// eskirgan yozuvlarni olib tashlaymiz (cheksiz o'sishning oldini oladi).
+function sweepProximityNotified(now) {
+  if (proximityNotified.size < 5000) return;
+  for (const [key, ts] of proximityNotified) {
+    if (now - ts > PROXIMITY_TTL_MS) proximityNotified.delete(key);
+  }
+}
 
 async function checkProximity(io, onlinePlayers, attackerId, lat, lng) {
   try {
@@ -41,7 +51,8 @@ async function checkProximity(io, onlinePlayers, attackerId, lat, lng) {
       if (!online?.socketId) continue; // real-time faqat onlayn Ultra egaga
       if (entitlements(online.tier || 'free').notifications !== 'realtime') continue; // faqat Ultra
       const key = `${oid}:${attackerId}`;
-      if (now - (proximityNotified.get(key) || 0) < 5 * 60 * 1000) continue; // spam guard
+      if (now - (proximityNotified.get(key) || 0) < PROXIMITY_TTL_MS) continue; // spam guard
+      sweepProximityNotified(now);
       proximityNotified.set(key, now);
       io.to(online.socketId).emit('territory:proximity', { attackerUsername: attackerName });
     }
@@ -235,7 +246,15 @@ function handleLocation(io, socket, onlinePlayers) {
   });
 
   socket.on('disconnect', () => {
-    userTrails.delete(userId);
+    // Reconnect race: yangi socket allaqachon faol bo'lsa, eski socketning kechikkan
+    // disconnect'i faol trailni o'chirmasin (yarim aylanib yurgan user trailini yo'qotardi).
+    const activeEntry = onlinePlayers.get(userId);
+    const isStale = !!(activeEntry && activeEntry.socketId !== socket.id);
+
+    if (!isStale) {
+      userTrails.delete(userId);
+      lastProximityAt.delete(userId);
+    }
     flushCheat(userId);
     const distToFlush = pendingDistance.get(userId) || 0;
     pendingDistance.delete(userId);
@@ -253,8 +272,8 @@ function getUserTrail(userId) {
 }
 
 // Capture muvaffaqiyatli bo'lgach server trailini tozalaydi — keyingi loop toza boshlanadi.
-// Web socket orqali o'zi 'trail:reset' yuboradi; mobil REST capture esa yubormaydi —
-// shuning uchun server tomonda tozalaymiz, aks holda keyingi capture eski nuqtalarni qo'shib yuboradi.
+// REST capture (territoryController) ham, socket capture (territoryHandler) ham shu
+// funksiyani chaqiradi — aks holda keyingi capture eski nuqtalarni qo'shib yuborardi.
 function resetUserTrail(userId) {
   userTrails.set(userId, []);
 }

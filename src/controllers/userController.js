@@ -18,11 +18,42 @@ async function getProfile(req, res, next) {
 
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const { passwordHash, socketId, ...userWithoutSensitive } = user;
+    const isMe = String(user.id) === String(req.user.id);
+
+    // Hamma uchun ochiq (public) maydonlar. phone/telegramChatId/expoPushToken/
+    // lastLocation/coins kabi shaxsiy maydonlar FAQAT egasining o'ziga qaytariladi —
+    // aks holda istalgan login qilgan user boshqalarning raqami va joylashuvini ko'rardi.
+    const publicProfile = {
+      id: user.id,
+      username: user.username,
+      color: user.color,
+      avatarUrl: user.avatarUrl,
+      xp: user.xp,
+      level: user.level,
+      totalArea: user.totalArea,
+      totalDistance: user.totalDistance,
+      territoriesCaptured: user.territoriesCaptured,
+      territoriesLost: user.territoriesLost,
+      isOnline: user.isOnline,
+      lastSeen: user.lastSeen,
+      createdAt: user.createdAt,
+      teamId: user.teamId,
+      isPremium: !!(user.isPremium && user.premiumUntil && new Date() < new Date(user.premiumUntil)),
+      premiumUntil: user.premiumUntil,
+      premiumTier: user.premiumTier,
+      activeSkinMarker: user.activeSkinMarker,
+      activeSkinTrail: user.activeSkinTrail,
+    };
+
+    let profile = publicProfile;
+    if (isMe) {
+      const { passwordHash, socketId, passwordResetToken, passwordResetExpires, ...own } = user;
+      profile = { ...own, isPremium: publicProfile.isPremium };
+    }
 
     res.json({
       user: {
-        ...userWithoutSensitive,
+        ...profile,
         teamName: user.team?.name,
         teamColor: user.team?.color,
         teamTag: user.team?.tag,
@@ -117,15 +148,30 @@ async function getOnlinePlayers(req, res, next) {
   }
 }
 
+// O'chirilayotgan hududlar bo'yicha jamoa maydonlarini to'g'ri kamaytirish:
+// faqat o'sha jamoa nomidan egallangan hududlar (t.teamId) hisobga olinadi.
+// Avval barcha maydon joriy jamoadan ayirilardi — jamoa statistikasi buzilardi.
+async function decrementTeamAreas(territories) {
+  const byTeam = new Map();
+  for (const t of territories) {
+    if (t.teamId) byTeam.set(t.teamId, (byTeam.get(t.teamId) || 0) + (t.area || 0));
+  }
+  for (const [teamId, area] of byTeam) {
+    await prisma.team.update({
+      where: { id: teamId },
+      data: { totalArea: { decrement: area } }
+    }).catch(() => {}); // jamoa o'chirilgan bo'lishi mumkin
+  }
+}
+
 async function clearMyData(req, res, next) {
   try {
     const userId = req.user.id || req.user._id;
     const territories = await prisma.territory.findMany({ where: { ownerId: userId } });
-    const totalArea = territories.reduce((s, t) => s + (t.area || 0), 0);
 
     await prisma.territory.deleteMany({ where: { ownerId: userId } });
     await prisma.gameEvent.deleteMany({ where: { actorId: userId } });
-    
+
     await prisma.user.update({
       where: { id: userId },
       data: {
@@ -134,13 +180,7 @@ async function clearMyData(req, res, next) {
       }
     });
 
-    const userTeamId = req.user.teamId;
-    if (userTeamId) {
-      await prisma.team.update({
-        where: { id: userTeamId },
-        data: { totalArea: { decrement: totalArea } }
-      });
-    }
+    await decrementTeamAreas(territories);
 
     const io = getIo();
     if (io) {
@@ -164,16 +204,19 @@ async function deleteAccount(req, res, next) {
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) return res.status(400).json({ error: 'Parol noto\'g\'ri' });
 
+    const territories = await prisma.territory.findMany({
+      where: { ownerId: userId },
+      select: { id: true, teamId: true, area: true }
+    });
+
     await prisma.territory.deleteMany({ where: { ownerId: userId } });
+    await decrementTeamAreas(territories);
 
     if (user.teamId) {
       await prisma.team.update({
         where: { id: user.teamId },
-        data: {
-          memberCount: { decrement: 1 },
-          totalArea: { decrement: user.totalArea || 0 }
-        }
-      });
+        data: { memberCount: { decrement: 1 } }
+      }).catch(() => {});
     }
 
     await prisma.team.updateMany({
@@ -181,7 +224,21 @@ async function deleteAccount(req, res, next) {
       data: { ownerId: null }
     });
 
+    // Majburiy (required) FK bog'lanishlar user o'chirilishidan OLDIN tozalanishi shart —
+    // aks holda Postgres RESTRICT tufayli delete 500 bilan yiqiladi (har anti-cheat
+    // logi yoki jamoa so'rovi bor foydalanuvchida shunday bo'lardi).
+    await prisma.teamRequest.deleteMany({ where: { userId } });
+    await prisma.antiCheatLog.deleteMany({ where: { userId } });
+    await prisma.warning.deleteMany({ where: { OR: [{ userId }, { adminId: userId }] } });
+
     await prisma.user.delete({ where: { id: userId } });
+
+    const io = getIo();
+    if (io) {
+      for (const t of territories) {
+        io.to('global').emit('territory:removed', { territoryId: t.id.toString() });
+      }
+    }
 
     res.json({ message: 'Account deleted' });
   } catch (err) {

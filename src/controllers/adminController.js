@@ -2,7 +2,7 @@ const bcrypt = require('bcryptjs');
 // Umumiy (yagona) Prisma instansi — har modulda alohida `new PrismaClient()` ulanish
 // pulini ko'paytirib, ko'p foydalanuvchida ulanishlarni tugatadi. Bitta pool ishlatamiz.
 const { prisma } = require('../config/database');
-const { getOnlinePlayers } = require('../socket/index');
+const { getOnlinePlayers, setPlayerTeam } = require('../socket/index');
 const { TIERS } = require('../config/tiers');
 
 // ─── Dashboard stats ───────────────────────────────────────────────────────────
@@ -239,23 +239,52 @@ async function deleteUser(req, res, next) {
     if (req.params.id === reqUserId.toString()) {
       return res.status(400).json({ error: 'O\'zingizni o\'chira olmaysiz' });
     }
-    const user = await prisma.user.delete({ where: { id: req.params.id } });
+    const userId = req.params.id;
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, teamId: true }
+    });
+    if (!user) return res.status(404).json({ error: 'Topilmadi' });
 
-    await Promise.all([
-      // Hududlarini o'chirish
-      prisma.territory.deleteMany({ where: { ownerId: req.params.id } }),
-      // Ogohlantirishlarini o'chirish
-      prisma.warning.deleteMany({ where: { userId: req.params.id } }),
-      // Jamoa a'zosi bo'lsa: memberCount va totalArea kamaytirish
-      user.teamId
-        ? prisma.team.update({
-            where: { id: user.teamId },
-            data: { memberCount: { decrement: 1 }, totalArea: { decrement: user.totalArea || 0 } }
-          })
-        : Promise.resolve(),
-      // Jamoa egasi bo'lsa ownerId ni null qilish
-      prisma.team.updateMany({ where: { ownerId: req.params.id }, data: { ownerId: null } }),
-    ]);
+    // FK (RESTRICT) bog'lanishlar user o'chirilishidan OLDIN tozalanadi — aks holda
+    // hududi/anti-cheat logi/jamoa so'rovi bor har qanday userda delete 500 berardi.
+    const territories = await prisma.territory.findMany({
+      where: { ownerId: userId },
+      select: { id: true, teamId: true, area: true }
+    });
+    await prisma.territory.deleteMany({ where: { ownerId: userId } });
+    await prisma.teamRequest.deleteMany({ where: { userId } });
+    await prisma.antiCheatLog.deleteMany({ where: { userId } });
+    await prisma.warning.deleteMany({ where: { OR: [{ userId }, { adminId: userId }] } });
+
+    // Jamoa maydonlari — hudud qaysi jamoa nomidan egallangan bo'lsa o'shanikidan ayiriladi
+    const byTeam = new Map();
+    for (const t of territories) {
+      if (t.teamId) byTeam.set(t.teamId, (byTeam.get(t.teamId) || 0) + (t.area || 0));
+    }
+    for (const [teamId, area] of byTeam) {
+      await prisma.team.update({
+        where: { id: teamId },
+        data: { totalArea: { decrement: area } }
+      }).catch(() => {});
+    }
+
+    if (user.teamId) {
+      await prisma.team.update({
+        where: { id: user.teamId },
+        data: { memberCount: { decrement: 1 } }
+      }).catch(() => {});
+    }
+    await prisma.team.updateMany({ where: { ownerId: userId }, data: { ownerId: null } });
+
+    await prisma.user.delete({ where: { id: userId } });
+
+    const io = req.app.get('io');
+    if (io) {
+      for (const t of territories) {
+        io.to('global').emit('territory:removed', { territoryId: t.id.toString() });
+      }
+    }
 
     res.json({ message: 'O\'chirildi' });
   } catch (err) { next(err); }
@@ -332,8 +361,28 @@ async function getTeams(req, res, next) {
 
 async function deleteTeam(req, res, next) {
   try {
-    const team = await prisma.team.delete({ where: { id: req.params.id } });
-    await prisma.user.updateMany({ where: { teamId: req.params.id }, data: { teamId: null } });
+    const teamId = req.params.id;
+    const team = await prisma.team.findUnique({ where: { id: teamId } });
+    if (!team) return res.status(404).json({ error: 'Topilmadi' });
+
+    const members = await prisma.user.findMany({
+      where: { teamId },
+      select: { id: true }
+    });
+
+    // Majburiy FK bog'lanishlar (marker, so'rovlar) jamoadan OLDIN o'chiriladi —
+    // aks holda markerli/so'rovli jamoani o'chirish RESTRICT tufayli 500 berardi.
+    await prisma.user.updateMany({ where: { teamId }, data: { teamId: null } });
+    await prisma.teamRequest.deleteMany({ where: { teamId } });
+    await prisma.teamMarker.deleteMany({ where: { teamId } });
+    await prisma.team.delete({ where: { id: teamId } });
+
+    // Onlayn a'zolarning socket roomlarini ham yangilab qo'yamiz
+    const io = req.app.get('io');
+    if (io) {
+      for (const m of members) setPlayerTeam(io, m.id, null);
+    }
+
     res.json({ message: 'O\'chirildi' });
   } catch (err) { next(err); }
 }
@@ -516,8 +565,11 @@ async function getLiveMap(req, res, next) {
         where: { isOnline: true, isAdmin: false },
         select: { id: true, username: true, color: true, level: true, lastLocation: true }
       }),
+      // territoryId null bo'lganlar (hududi allaqachon o'chirilgan eski eventlar)
+      // hotspot bo'la olmaydi — ularni DB darajasida chiqarib tashlaymiz, aks holda
+      // bu so'rov vaqt o'tishi bilan cheksiz o'sib live-map'ni sekinlashtiradi.
       prisma.gameEvent.findMany({
-        where: { type: 'territory_captured', data: { not: null } },
+        where: { type: 'territory_captured', data: { not: null }, territoryId: { not: null } },
         select: { territoryId: true, data: true }
       }),
     ]);

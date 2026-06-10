@@ -1,9 +1,11 @@
 const { prisma } = require('../config/database');
 const { getTerritoriesInBounds, getUserTerritories, deleteTerritory, captureTerritory } = require('../services/territoryService');
-const { invalidateLeaderboardCache, emitLeaderboardUpdate } = require('./leaderboardController');
+const { runPostCaptureEffects } = require('../services/captureEffects');
+const { getOnlinePlayersMap } = require('../socket');
 const { getUserTrail, resetUserTrail } = require('../socket/handlers/locationHandler');
 const { detectClosedPolygon } = require('../services/geoService');
 const { tierOf, entitlements } = require('../config/tiers');
+const logger = require('../utils/logger');
 
 async function getTerritories(req, res, next) {
   try {
@@ -131,11 +133,13 @@ async function captureFromRest(req, res, next) {
     resetUserTrail(userId);
 
     const io = req.app.get('io');
+    let username = req.user.username;
     if (io) {
       const user = await prisma.user.findUnique({
         where: { id: userId },
         select: { username: true, socketId: true, teamId: true }
       });
+      username = user?.username || username;
 
       if (user?.teamId) io.to(`team:${user.teamId}`).emit('team:trailReset', { userId });
 
@@ -150,37 +154,13 @@ async function captureFromRest(req, res, next) {
         territory: result.territory,
         capturedBy: {
           userId,
-          username: user?.username,
+          username,
           level: result.newLevel,
           color: req.user.color,
         },
         xpGained: result.xpGained,
         stolenFrom: result.stolenFrom,
       });
-
-      for (const notif of result.invasionNotifications || []) {
-        const owner = await prisma.user.findUnique({
-          where: { id: notif.ownerId },
-          select: { socketId: true, isPremium: true, premiumUntil: true, premiumTier: true }
-        });
-        if (owner?.socketId && entitlements(tierOf(owner)).notifications !== 'none') {
-          io.to(owner.socketId).emit('territory:invaded', {
-            attackerUsername: user?.username,
-            percent: notif.capturePercent,
-          });
-        }
-      }
-
-      invalidateLeaderboardCache();
-      emitLeaderboardUpdate(io);
-
-      if (result.newLevel > result.oldLevel) {
-        io.to('global').emit('player:levelup', {
-          userId,
-          username: user?.username,
-          newLevel: result.newLevel,
-        });
-      }
     }
 
     res.json({
@@ -190,6 +170,18 @@ async function captureFromRest(req, res, next) {
       newLevel: result.newLevel,
       stolenFrom: result.stolenFrom,
     });
+
+    // Yon effektlar (invasion/qo'shni pushlar, leaderboard, level-up coin/push) —
+    // javobni kechiktirmaslik uchun fire-and-forget. Socket yo'li bilan BIR XIL xulq.
+    if (io) {
+      runPostCaptureEffects({
+        io,
+        userId,
+        username,
+        result,
+        onlinePlayers: getOnlinePlayersMap(),
+      }).catch((err) => logger.warn('Post-capture effects failed (REST)', { err: err.message }));
+    }
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message, code: err.code, requiredLevel: err.requiredLevel, limit: err.limit });
     next(err);
@@ -217,7 +209,9 @@ async function getTerritoryHistory(req, res, next) {
         createdAt: { gte: since },
         OR: [
           { actorId: userId },
-          { data: { path: ['stolenFrom'], equals: userId } }
+          // stolenFrom — massiv; `equals` massiv ichidagi elementni hech qachon topmaydi,
+          // shu sabab "yo'qotilgan" yozuvlar tarixda chiqmas edi. JSONB uchun to'g'risi: array_contains.
+          { data: { path: ['stolenFrom'], array_contains: [userId] } }
         ]
       },
       orderBy: { createdAt: 'desc' },

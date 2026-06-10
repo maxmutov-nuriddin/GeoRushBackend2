@@ -173,11 +173,16 @@ async function captureTerritory(userId, rawPoints) {
     // Eski hududlarni o'chirish va statistikalarni yangilash
     for (const old of deletableList) {
       const oldOwner = old.ownerId;
+
+      // deleteMany — parallel capture xuddi shu hududni allaqachon o'chirgan bo'lsa
+      // P2025 bilan butun transaction yiqilmasin; o'chirilmagan bo'lsa stats ham o'zgarmaydi.
+      const del = await tx.territory.deleteMany({ where: { id: old.id } });
+      if (del.count === 0) continue;
+
       const fraction = estimateOverlapFraction(polygonPoints, old.polygon);
       invasionNotifications.push({ ownerId: oldOwner, capturePercent: Math.round(fraction * 100) });
       stolenFrom.push(oldOwner);
 
-      await tx.territory.delete({ where: { id: old.id } });
       await tx.user.update({
         where: { id: old.ownerId },
         data: {
@@ -410,11 +415,20 @@ async function deleteTerritory(territoryId, userId) {
   if (!territory) throw Object.assign(new Error('Territory not found or not yours'), { status: 404 });
 
   await prisma.territory.delete({ where: { id: territoryId } });
-  
+
   await prisma.user.update({
     where: { id: userId },
     data: { totalArea: { decrement: territory.area } }
   });
+
+  // Hudud jamoa nomidan egallangan bo'lsa, jamoa maydoni ham kamayishi shart —
+  // aks holda team leaderboard'da o'chirilgan hudud "osilib" qolardi.
+  if (territory.teamId) {
+    await prisma.team.update({
+      where: { id: territory.teamId },
+      data: { totalArea: { decrement: territory.area } }
+    }).catch(() => {}); // jamoa allaqachon o'chirilgan bo'lishi mumkin
+  }
 
   return { id: territory.id, area: territory.area };
 }

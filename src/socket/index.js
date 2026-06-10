@@ -130,7 +130,14 @@ function initializeSocket(io) {
 
     socket.on('disconnect', async (reason) => {
       logger.debug(`Player disconnected: ${username} — ${reason}`);
-      const teamId = onlinePlayers.get(userId)?.teamId || null;
+
+      // Reconnect race himoyasi: yangi socket allaqachon ulangan bo'lsa (entry yangi
+      // socketId bilan almashgan), ESKI socketning kechikkan disconnect'i yangi
+      // ulanishni o'chirib yubormasin (isOnline=false, player:left, trail yo'qolishi).
+      const entry = onlinePlayers.get(userId);
+      if (entry && entry.socketId !== socket.id) return;
+
+      const teamId = entry?.teamId || null;
       onlinePlayers.delete(userId);
       removePlayer(userId);
 
@@ -148,4 +155,10 @@ function initializeSocket(io) {
   });
 }
 
-module.exports = { initializeSocket, getOnlinePlayers, setPlayerTeam };
+// Jonli (live) Map'ni qaytaradi — REST yo'lidagi capture effektlari onlayn holatni
+// DB'dagi (eskirishi mumkin bo'lgan) socketId emas, shu xotira manbasidan o'qiydi.
+function getOnlinePlayersMap() {
+  return onlinePlayers;
+}
+
+module.exports = { initializeSocket, getOnlinePlayers, getOnlinePlayersMap, setPlayerTeam };

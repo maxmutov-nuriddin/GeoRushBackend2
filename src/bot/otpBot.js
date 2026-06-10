@@ -3,6 +3,9 @@ const crypto       = require('crypto');
 const logger       = require('../utils/logger');
 // Umumiy (yagona) Prisma instansi — alohida client ochmaymiz (ulanishlarni tejaymiz).
 const { prisma }   = require('../config/database');
+// welcomeCoins kabi qiymatlar uchun YAGONA manba — tiers.js. Avval bu faylda 350/1000
+// hardcode edi, admin panel esa tiers'dagi 2500/7500 berardi — bir xil narxga har xil bonus.
+const { TIERS }    = require('../config/tiers');
 
 // DB-backed yordamchi funksiyalar (server restart bo'lsa ham saqlanadi)
 async function setPending(chatId, type, windowMs) {
@@ -88,7 +91,7 @@ async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthl
   const starKey  = isYearly ? `${tier}_yearly` : tier;
   let finalStars = TIER_STARS[starKey] || 150;
   const days = PREMIUM_DAYS[period] || 30;
-  const welcomeCoins = tier === 'ultra' ? 1000 : 350;
+  const welcomeCoins = (TIERS[tier] || TIERS.pro).welcomeCoins;
   const periodLabel  = isYearly ? '12 oy (2 oy bepul!)' : '1 oy';
 
   const user = await prisma.user.findUnique({
@@ -122,9 +125,10 @@ async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthl
     ? `${formatSom(finalAmount)} so'm (chegirma bilan, aslida ${formatSom(baseAmount)} so'm)`
     : `${formatSom(finalAmount)} so'm`;
 
+  const coinsLabel = formatSom(welcomeCoins);
   let description = tier === 'ultra'
-    ? `👑 Qat'iy himoya  •  ⚡ 3x XP  •  🪙 1 000 coin + 2x bonus\n• Elite badge, skinlar bepul!\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`
-    : `💎 Hudud himoyasi  •  ⚡ 2x XP  •  🪙 350 coin + 1.5x bonus\n• Premium badge\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`;
+    ? `👑 Qat'iy himoya  •  ⚡ 3x XP  •  🪙 ${coinsLabel} coin + 2x bonus\n• Elite badge, skinlar bepul!\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`
+    : `💎 Hudud himoyasi  •  ⚡ 2x XP  •  🪙 ${coinsLabel} coin + 1.5x bonus\n• Premium badge\n\n${periodLabel} — ${priceLabel}${isYearly ? '\n🎁 2 oy BEPUL!' : ''}`;
 
   if (isWelcomeActive && welcomeDiscount >= promoDiscount) {
     description += `\n\n🎁 Birinchi ro'yxatdan o'tganingiz uchun 30% start chegirmasi qo'llandi!`;
@@ -155,7 +159,7 @@ async function handleSuccessfulPayment(msg) {
   const period = payload.period || 'monthly';
   const days   = PREMIUM_DAYS[period] || 30;
   const promoCode = payload.promoCode;
-  const coinsBonus = tier === 'ultra' ? 1000 : 350;
+  const coinsBonus = (TIERS[tier] || TIERS.pro).welcomeCoins;
   const xpMult     = tier === 'ultra' ? '3x' : '2x';
   const periodLabel = period === 'yearly' ? '12 oy (365 kun)' : '30 kun';
 
@@ -167,13 +171,24 @@ async function handleSuccessfulPayment(msg) {
       }).catch(() => {});
     }
 
-    const premiumUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    // Faol premium bo'lsa muddat USTIGA qo'shiladi (admin givePremium bilan bir xil) —
+    // avval to'lov sanasidan qayta hisoblanib, qolgan kunlar yo'qolardi.
+    const existing = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { premiumUntil: true }
+    });
+    const base = (existing?.premiumUntil && existing.premiumUntil > new Date())
+      ? existing.premiumUntil.getTime()
+      : Date.now();
+    const premiumUntil = new Date(base + days * 24 * 60 * 60 * 1000);
+
     await prisma.user.update({
       where: { id: payload.userId },
       data: {
         isPremium: true,
         premiumUntil,
         premiumTier: tier,
+        premiumIsGift: false, // real to'lov — statistika/daromad hisobida qatnashadi
         coins: { increment: coinsBonus },
       }
     });
