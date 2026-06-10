@@ -69,7 +69,10 @@ const ALLOWED_ORIGINS = [
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
-    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+    // localhost/127.0.0.1 originlar faqat production BO'LMAGAN muhitda (lokal dev) ruxsat etiladi.
+    // Productionда (NODE_ENV==='production') faqat ALLOWED_ORIGINS amal qiladi.
+    if (process.env.NODE_ENV !== 'production' &&
+        (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:'))) {
       return callback(null, true);
     }
     if (ALLOWED_ORIGINS.includes(origin)) {

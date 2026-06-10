@@ -1,5 +1,9 @@
 version: '3.8'
 
+# ⚠️ DIQQAT: bu fayldagi JWT_SECRET va parollar FAQAT lokal dev uchun.
+# Production'da ishlatilmaydi — prod deploy `render.yaml` orqali, maxfiy qiymatlar
+# Render env / secret manager'da turadi va bu faylga KO'CHMASLIGI kerak.
+
 services:
   app:
     build: .

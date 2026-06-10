@@ -1,4 +1,4 @@
-const prisma = require('../config/database');
+const { prisma } = require('../config/database');
 const { getTerritoriesInBounds, getUserTerritories, deleteTerritory, captureTerritory } = require('../services/territoryService');
 const { invalidateLeaderboardCache, emitLeaderboardUpdate } = require('./leaderboardController');
 const { getUserTrail, resetUserTrail } = require('../socket/handlers/locationHandler');

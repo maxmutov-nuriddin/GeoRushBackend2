@@ -109,6 +109,7 @@ async function runTests() {
     console.log('\\n🎉 BARCHA TESTLAR MUVAFFAQIYATLI YAKUNLANDI!');
   } catch (error) {
     console.error('\\n❌ TEST XATOSI:', error.message);
+    process.exitCode = 1; // DB yoki test xatosida CI "pass" bermasin (false-positive oldini oladi)
   } finally {
     await prisma.$disconnect();
   }
