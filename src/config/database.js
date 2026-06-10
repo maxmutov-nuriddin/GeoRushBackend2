@@ -8,12 +8,18 @@ const prisma = new PrismaClient({
 async function initializeDatabase() {
   try {
     await prisma.$connect();
-    // PostGIS kengaytmasini faollashtirish (geografik so'rovlar uchun)
-    await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS postgis;');
-    logger.info('PostgreSQL (Prisma) connected & PostGIS enabled');
+    logger.info('PostgreSQL (Prisma) connected');
   } catch (err) {
     logger.error('PostgreSQL connection error:', err);
     process.exit(1);
+  }
+  // PostGIS kengaytmasini faollashtirish (geografik so'rovlar uchun).
+  // Agar PostGIS hali o'rnatilmagan bo'lsa — serverni yiqitmaymiz, faqat ogohlantiramiz.
+  try {
+    await prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS postgis;');
+    logger.info('PostGIS enabled');
+  } catch (err) {
+    logger.warn('PostGIS not available yet — geo features disabled until installed:', err.message);
   }
 }
 
