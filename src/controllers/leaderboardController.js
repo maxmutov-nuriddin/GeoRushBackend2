@@ -21,9 +21,9 @@ async function getPlayerLeaderboard(req, res, next) {
       });
       const tier = tierOf(me);
       if (reqScope === 'city' && (tier === 'pro' || tier === 'ultra') && me?.city) {
-        filter.city = me.city; scope = 'city';
+        filter.city = { equals: me.city, mode: 'insensitive' }; scope = 'city';
       } else if (reqScope === 'country' && tier === 'ultra' && me?.country) {
-        filter.country = me.country; scope = 'country';
+        filter.country = { equals: me.country, mode: 'insensitive' }; scope = 'country';
       }
     }
 
