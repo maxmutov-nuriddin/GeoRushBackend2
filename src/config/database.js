@@ -22,11 +22,57 @@ async function initializeDatabase() {
     logger.warn('PostGIS not available yet — geo features disabled until installed:', err.message);
   }
 
+  // Asosiy jadvallarni kafolatlash. Deploy `prisma db push` ni ishlatmaydi
+  // (u 16 ta qo'lda yaratilgan indeksni o'chirib yuboradi), shuning uchun
+  // schema'ga qo'shilgan yangi jadvallar bazaga avtomatik tushmaydi.
+  // Bu yerda IF NOT EXISTS bilan idempotent yaratamiz — login/register
+  // RefreshToken jadvaliga bog'liq, jadval yo'qligida 500 beradi.
+  await ensureCoreTables();
+
   // Indekslarni kafolatlash. Bularsiz har capture/xarita/proximity so'rovi butun
   // jadvalni skanerlaydi (full scan) — ko'p foydalanuvchida baza tiqilib qoladi.
   // Hammasi IF NOT EXISTS — birinchi safar yaratiladi, keyin instant no-op.
   // So'rov MATNI o'zgarmaydi — Postgres planneri shu indekslardan avtomatik foydalanadi.
   await ensureIndexes();
+}
+
+// Idempotent jadval yaratish. Prisma schema'dagi modellar default mapping bilan
+// (model nomi = jadval nomi, field nomi = ustun nomi) yaratiladi. Faqat deploy
+// vaqtida migratsiya bo'lmagani uchun yetishmay qolgan jadvallar shu yerda.
+async function ensureCoreTables() {
+  const statements = [
+    // RefreshToken — schema'da bor, lekin prod bazada yo'q edi (login/register 500).
+    `CREATE TABLE IF NOT EXISTS "RefreshToken" (
+       "id"        TEXT NOT NULL,
+       "token"     TEXT NOT NULL,
+       "userId"    TEXT NOT NULL,
+       "expiresAt" TIMESTAMP(3) NOT NULL,
+       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "RefreshToken_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "RefreshToken_token_key" ON "RefreshToken" ("token")`,
+    `CREATE INDEX IF NOT EXISTS "RefreshToken_userId_idx" ON "RefreshToken" ("userId")`,
+    // FK + ON DELETE CASCADE — Prisma onDelete: Cascade'ga mos. Postgres'da
+    // constraint uchun IF NOT EXISTS yo'q, shuning uchun pg_constraint orqali tekshiramiz.
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'RefreshToken_userId_fkey') THEN
+         ALTER TABLE "RefreshToken"
+           ADD CONSTRAINT "RefreshToken_userId_fkey"
+           FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
+  ];
+
+  let ok = 0;
+  for (const sql of statements) {
+    try {
+      await prisma.$executeRawUnsafe(sql);
+      ok++;
+    } catch (err) {
+      logger.warn('Table ensure skip:', err.message.split('\n')[0]);
+    }
+  }
+  logger.info(`DB core tables ensured (${ok}/${statements.length})`);
 }
 
 // Idempotent indeks yaratish. Har bittasi alohida try/catch — biri ishlamasa
