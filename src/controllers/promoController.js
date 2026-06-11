@@ -7,6 +7,10 @@ async function createPromoCode(req, res, next) {
     if (!code || discountPct === undefined || !expiresAt) {
       return res.status(400).json({ error: 'Barcha maydonlar majburiy (code, discountPct, expiresAt)' });
     }
+    const pct = Number(discountPct);
+    if (isNaN(pct) || pct < 1 || pct > 100) {
+      return res.status(400).json({ error: 'discountPct 1 dan 100 gacha bo\'lishi kerak' });
+    }
 
     const uppercaseCode = code.toUpperCase().trim();
     const existing = await prisma.promoCode.findUnique({ where: { code: uppercaseCode } });

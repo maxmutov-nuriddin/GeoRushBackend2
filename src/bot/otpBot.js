@@ -77,7 +77,42 @@ function calculateSomPrice(tier, period, discountPct = 0) {
   };
   const base = basePrices[tier]?.[period] || 39900;
   if (!discountPct) return base;
+  if (discountPct >= 100) return 0;
   return Math.max(1000, Math.round(base * (1 - discountPct / 100)));
+}
+
+async function grantPremiumFree(chatId, userId, tier, period, promoCode) {
+  const days = PREMIUM_DAYS[period] || 30;
+  const coinsBonus = (TIERS[tier] || TIERS.pro).welcomeCoins;
+  const xpMult = tier === 'ultra' ? '3x' : '2x';
+  const periodLabel = period === 'yearly' ? '12 oy (365 kun)' : '30 kun';
+
+  if (promoCode) {
+    await prisma.promoCode.updateMany({
+      where: { code: promoCode.toUpperCase() },
+      data: { usesCount: { increment: 1 } }
+    }).catch(() => {});
+  }
+
+  const existing = await prisma.user.findUnique({ where: { id: userId }, select: { premiumUntil: true } });
+  const base = (existing?.premiumUntil && existing.premiumUntil > new Date())
+    ? existing.premiumUntil.getTime()
+    : Date.now();
+  const premiumUntil = new Date(base + days * 24 * 60 * 60 * 1000);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { isPremium: true, premiumUntil, premiumTier: tier, premiumIsGift: true, coins: { increment: coinsBonus } }
+  });
+
+  const until = premiumUntil.toLocaleDateString('uz-UZ');
+  await bot.sendMessage(chatId,
+    `🎉 GeoRush ${tier.toUpperCase()} faollashtirildi! (100% promokod)\n\n` +
+    `⏳ Muddati: ${until} gacha (${periodLabel})\n` +
+    `⚡ ${xpMult} XP yoqildi\n` +
+    `🪙 +${coinsBonus.toLocaleString()} GeoCoins berildi!`
+  );
+  logger.info(`Free premium granted: userId=${userId}, tier=${tier}, period=${period}, promoCode=${promoCode}`);
 }
 
 function formatSom(amount) {
@@ -115,6 +150,9 @@ async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthl
   }
 
   const effectiveDiscount = Math.max(welcomeDiscount, promoDiscount);
+  if (effectiveDiscount >= 100) {
+    return grantPremiumFree(chatId, userId, tier, period, promoCode);
+  }
   if (effectiveDiscount > 0) {
     finalStars = Math.max(1, Math.round(finalStars * (1 - effectiveDiscount / 100)));
   }
@@ -264,6 +302,11 @@ async function initBot() {
       }
 
       const finalDiscount = Math.max(welcomeDiscount, promoDiscount);
+      if (finalDiscount >= 100) {
+        const userForFree = await prisma.user.findFirst({ where: { telegramChatId: String(chatId) }, select: { id: true } });
+        if (userForFree) return grantPremiumFree(chatId, userForFree.id, tier, period, promoCode);
+        return bot.sendMessage(chatId, '❌ Foydalanuvchi topilmadi. Iltimos, ilovaga kiring.').catch(() => {});
+      }
       const baseAmount = calculateSomPrice(tier, period, 0);
       const finalAmount = calculateSomPrice(tier, period, finalDiscount);
       const periodLabel = period === 'yearly' ? 'Yillik (12 oy)' : 'Oylik (1 oy)';
