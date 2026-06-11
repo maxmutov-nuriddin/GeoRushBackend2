@@ -15,7 +15,7 @@ module.exports = {
   // Territory rules
   TERRITORY_MIN_AREA_M2: 50,        // Minimum 50 m²
   TERRITORY_MAX_AREA_M2: 5_000_000, // Max 5 km²
-  MAX_TRAIL_POINTS: parseInt(process.env.MAX_TRAIL_POINTS || '2000'),
+  MAX_TRAIL_POINTS: parseInt(process.env.MAX_TRAIL_POINTS || '5000'),
   MIN_TRAIL_POINTS_FOR_POLYGON: 4,
   POLYGON_SIMPLIFY_TOLERANCE: 0.000005, // ~0.5m
 

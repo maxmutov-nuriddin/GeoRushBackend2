@@ -2,10 +2,14 @@
 // (/api/territories/capture) yo'llari uchun YAGONA manba. Avval bu logika ikki joyda
 // yarim-yarim edi: REST yo'lida (mobil!) level-up coin, level-up push, offline egalarga
 // invasion push va qo'shni (neighbor) pushlar umuman yo'q edi.
+//
+// Scale-out: onlayn tekshiruvlar onlineStore orqali (lokal Map yoki Redis mirror),
+// socket emitlari user:{id} room orqali — egasi qaysi instance'da bo'lsa ham yetadi.
 const { Expo } = require('expo-server-sdk');
 const { prisma } = require('../config/database');
 const { tierOf, entitlements } = require('../config/tiers');
 const { invalidateLeaderboardCache, emitLeaderboardUpdate } = require('../controllers/leaderboardController');
+const onlineStore = require('./onlineStore');
 const logger = require('../utils/logger');
 
 const expo = new Expo();
@@ -22,14 +26,14 @@ async function sendExpoPush(pushToken, title, body) {
 
 // Hujum (invasion) bildirishnomalari. Onlayn ega — socket emit (bitta event, haqiqiy foiz
 // bilan); offlayn ega — Expo push. Free tier bildirishnoma olmaydi (entitlements).
-async function emitInvasionNotifications(io, { attackerUsername, notifications, onlinePlayers }) {
+async function emitInvasionNotifications(io, { attackerUsername, notifications }) {
   for (const notif of notifications || []) {
     const pct = notif.capturePercent;
-    const online = onlinePlayers?.get(notif.ownerId) || null;
+    const online = await onlineStore.get(notif.ownerId);
 
-    if (online?.socketId) {
+    if (online) {
       if (entitlements(online.tier || 'free').notifications === 'none') continue;
-      io.to(online.socketId).emit('territory:invaded', { attackerUsername, percent: pct });
+      io.to(`user:${notif.ownerId}`).emit('territory:invaded', { attackerUsername, percent: pct });
       continue;
     }
 
@@ -37,7 +41,7 @@ async function emitInvasionNotifications(io, { attackerUsername, notifications, 
     try {
       dbUser = await prisma.user.findUnique({
         where: { id: notif.ownerId },
-        select: { socketId: true, expoPushToken: true, isPremium: true, premiumUntil: true, premiumTier: true },
+        select: { expoPushToken: true, isPremium: true, premiumUntil: true, premiumTier: true },
       });
     } catch (err) {
       logger.warn('Invasion lookup failed', { ownerId: notif.ownerId, err: err.message });
@@ -45,9 +49,7 @@ async function emitInvasionNotifications(io, { attackerUsername, notifications, 
     }
     if (!dbUser || entitlements(tierOf(dbUser)).notifications === 'none') continue;
 
-    if (dbUser.socketId) {
-      io.to(dbUser.socketId).emit('territory:invaded', { attackerUsername, percent: pct });
-    } else if (dbUser.expoPushToken) {
+    if (dbUser.expoPushToken) {
       if (pct >= 100) {
         await sendExpoPush(
           dbUser.expoPushToken,
@@ -66,13 +68,16 @@ async function emitInvasionNotifications(io, { attackerUsername, notifications, 
 }
 
 // Qo'shni hudud egalariga push — faqat offlayn va Pro/Ultra egalarga.
-async function sendNeighborPushes({ attackerUsername, neighborOwnerIds, onlinePlayers }) {
+async function sendNeighborPushes({ attackerUsername, neighborOwnerIds }) {
   if (!neighborOwnerIds?.length) return;
-  const offlineIds = neighborOwnerIds.filter((oid) => !onlinePlayers?.get(oid)?.socketId);
+  const offlineIds = [];
+  for (const oid of neighborOwnerIds) {
+    if (!(await onlineStore.get(oid))) offlineIds.push(oid);
+  }
   if (!offlineIds.length) return;
   try {
     const users = await prisma.user.findMany({
-      where: { id: { in: offlineIds }, expoPushToken: { not: null }, socketId: null },
+      where: { id: { in: offlineIds }, expoPushToken: { not: null } },
       select: { expoPushToken: true, isPremium: true, premiumUntil: true, premiumTier: true },
     });
     for (const u of users) {
@@ -87,11 +92,11 @@ async function sendNeighborPushes({ attackerUsername, neighborOwnerIds, onlinePl
 }
 
 // Level oshganda: global broadcast + push + coin mukofoti (tier coinMult bilan).
-async function handleLevelUp(io, { userId, username, result, onlinePlayers, capturerSocket }) {
-  const oldLevel = result.oldLevel || onlinePlayers?.get(userId)?.level || 1;
+async function handleLevelUp(io, { userId, username, result, capturerSocket }) {
+  const oldLevel = result.oldLevel || onlineStore.getLocal(userId)?.level || 1;
   if (!(result.newLevel > oldLevel)) return;
 
-  const player = onlinePlayers?.get(userId);
+  const player = onlineStore.getLocal(userId);
   if (player) player.level = result.newLevel;
 
   io.to('global').emit('player:levelup', { userId, username, newLevel: result.newLevel });
@@ -100,7 +105,7 @@ async function handleLevelUp(io, { userId, username, result, onlinePlayers, capt
   try {
     dbUser = await prisma.user.findUnique({
       where: { id: userId },
-      select: { expoPushToken: true, socketId: true, isPremium: true, premiumUntil: true, premiumTier: true },
+      select: { expoPushToken: true, isPremium: true, premiumUntil: true, premiumTier: true },
     });
   } catch (err) { logger.warn('Level-up lookup failed', { userId, err: err.message }); }
 
@@ -117,7 +122,7 @@ async function handleLevelUp(io, { userId, username, result, onlinePlayers, capt
       premiumBonus: multiplier > 1,
     };
     if (capturerSocket) capturerSocket.emit('shop:coins_earned', coinsEvent);
-    else if (dbUser?.socketId) io.to(dbUser.socketId).emit('shop:coins_earned', coinsEvent);
+    else io.to(`user:${userId}`).emit('shop:coins_earned', coinsEvent);
   } catch (err) { logger.warn('Level-up coins failed', { userId, err: err.message }); }
 
   if (dbUser?.expoPushToken) {
@@ -131,14 +136,13 @@ async function handleLevelUp(io, { userId, username, result, onlinePlayers, capt
 
 // Capture'dan keyingi barcha yon effektlar (territory:new broadcast'dan tashqari —
 // u chaqiruvchi tomonda qoladi). Hech bir xato capture natijasini buzmaydi.
-async function runPostCaptureEffects({ io, userId, username, result, onlinePlayers = null, capturerSocket = null }) {
+async function runPostCaptureEffects({ io, userId, username, result, capturerSocket = null }) {
   const attackerUsername = username || 'Noma\'lum';
 
   try {
     await emitInvasionNotifications(io, {
       attackerUsername,
       notifications: result.invasionNotifications,
-      onlinePlayers,
     });
   } catch (err) { logger.warn('Invasion notifications failed', { err: err.message }); }
 
@@ -146,7 +150,6 @@ async function runPostCaptureEffects({ io, userId, username, result, onlinePlaye
     await sendNeighborPushes({
       attackerUsername,
       neighborOwnerIds: result.neighborNotifications,
-      onlinePlayers,
     });
   } catch (err) { logger.warn('Neighbor pushes failed', { err: err.message }); }
 
@@ -154,7 +157,7 @@ async function runPostCaptureEffects({ io, userId, username, result, onlinePlaye
   emitLeaderboardUpdate(io);
 
   try {
-    await handleLevelUp(io, { userId, username: attackerUsername, result, onlinePlayers, capturerSocket });
+    await handleLevelUp(io, { userId, username: attackerUsername, result, capturerSocket });
   } catch (err) { logger.warn('Level-up effects failed', { err: err.message }); }
 }
 

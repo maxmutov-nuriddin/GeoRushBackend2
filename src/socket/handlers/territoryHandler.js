@@ -2,14 +2,15 @@ const { captureTerritory } = require('../../services/territoryService');
 const { runPostCaptureEffects } = require('../../services/captureEffects');
 const { getUserTrail, resetUserTrail } = require('./locationHandler');
 const { detectClosedPolygon } = require('../../services/geoService');
+const onlineStore = require('../../services/onlineStore');
 const constants = require('../../config/constants');
 const logger = require('../../utils/logger');
 
 // Server trailidan polygon yasab, territory capture qiluvchi umumiy funksiya.
 // territory:capture va territory:submit ikkalasi ham shu funksiyani ishlatadi —
 // client dan kelgan nuqtalarga ISHONILMAYDI, faqat server trailidan foydalaniladi.
-async function processCaptureFromServerTrail(socket, io, onlinePlayers, userId) {
-  const trail = getUserTrail(userId);
+async function processCaptureFromServerTrail(socket, io, userId) {
+  const trail = await getUserTrail(userId);
 
   if (trail.length < constants.MIN_TRAIL_POINTS_FOR_POLYGON) {
     socket.emit('territory:error', { message: 'Not enough trail points to capture territory' });
@@ -29,8 +30,9 @@ async function processCaptureFromServerTrail(socket, io, onlinePlayers, userId) 
     // Server trailini darhol tozalaymiz — aks holda keyingi capture eski (allaqachon
     // zabt etilgan) nuqtalarni ham qo'shib yuboradi. Client o'z trailini o'zi tozalaydi,
     // lekin server xotirasidagi nusxa shu yerda tozalanishi shart.
-    resetUserTrail(userId);
-    const teamId = onlinePlayers.get(userId)?.teamId || null;
+    await resetUserTrail(userId);
+    const player = onlineStore.getLocal(userId);
+    const teamId = player?.teamId || null;
     if (teamId) io.to(`team:${teamId}`).emit('team:trailReset', { userId });
 
     const capturedMsg = result.premiumBonus
@@ -42,7 +44,7 @@ async function processCaptureFromServerTrail(socket, io, onlinePlayers, userId) 
       territory: result.territory,
       capturedBy: {
         userId,
-        username: onlinePlayers.get(userId)?.username,
+        username: player?.username,
         level: result.newLevel,
       },
       xpGained: result.xpGained,
@@ -52,9 +54,8 @@ async function processCaptureFromServerTrail(socket, io, onlinePlayers, userId) 
     await runPostCaptureEffects({
       io,
       userId,
-      username: onlinePlayers.get(userId)?.username,
+      username: player?.username,
       result,
-      onlinePlayers,
       capturerSocket: socket,
     });
 
@@ -79,17 +80,17 @@ async function processCaptureFromServerTrail(socket, io, onlinePlayers, userId) 
   }
 }
 
-function handleTerritory(io, socket, onlinePlayers) {
+function handleTerritory(io, socket) {
   const { userId } = socket;
 
   socket.on('territory:capture', () => {
-    processCaptureFromServerTrail(socket, io, onlinePlayers, userId);
+    processCaptureFromServerTrail(socket, io, userId);
   });
 
   // Client dan kelgan points ISHLATILMAYDI — server o'z trailidan foydalanadi.
   // Frontend territoriya yopilganini aniqlashi bilan bu event yuboriladi.
   socket.on('territory:submit', () => {
-    processCaptureFromServerTrail(socket, io, onlinePlayers, userId);
+    processCaptureFromServerTrail(socket, io, userId);
   });
 }
 

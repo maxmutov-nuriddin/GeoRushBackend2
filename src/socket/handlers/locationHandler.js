@@ -1,11 +1,12 @@
 const { validateLocationUpdate } = require('../../services/antiCheatService');
 const { haversineDistance } = require('../../services/geoService');
+const trailStore = require('../../services/trailStore');
+const onlineStore = require('../../services/onlineStore');
 const { prisma } = require('../../config/database');
 const constants = require('../../config/constants');
-const { tierOf, entitlements } = require('../../config/tiers');
+const { entitlements } = require('../../config/tiers');
 const logger = require('../../utils/logger');
 
-const userTrails = new Map();
 const pendingDistance = new Map(); // userId -> accumulated meters (not yet flushed to DB)
 
 // ── Ultra: yaqinlashuv (proximity) bildirishnomasi ───────────────────────────
@@ -24,7 +25,7 @@ function sweepProximityNotified(now) {
   }
 }
 
-async function checkProximity(io, onlinePlayers, attackerId, lat, lng) {
+async function checkProximity(io, attackerId, lat, lng) {
   try {
     const now = Date.now();
     if (now - (lastProximityAt.get(attackerId) || 0) < 30000) return;
@@ -41,20 +42,21 @@ async function checkProximity(io, onlinePlayers, attackerId, lat, lng) {
       LIMIT 20
     `;
     if (!terr.length) return;
-    const attackerName = onlinePlayers.get(attackerId)?.username || 'Raqib';
+    const attackerName = onlineStore.getLocal(attackerId)?.username || 'Raqib';
     const seen = new Set();
     for (const t of terr) {
       const oid = String(t.ownerId);
       if (seen.has(oid)) continue;
       seen.add(oid);
-      const online = onlinePlayers.get(oid);
-      if (!online?.socketId) continue; // real-time faqat onlayn Ultra egaga
+      // onlineStore.get — boshqa instance'dagi onlayn egani ham topadi (scale rejimi)
+      const online = await onlineStore.get(oid);
+      if (!online) continue; // real-time faqat onlayn Ultra egaga
       if (entitlements(online.tier || 'free').notifications !== 'realtime') continue; // faqat Ultra
       const key = `${oid}:${attackerId}`;
       if (now - (proximityNotified.get(key) || 0) < PROXIMITY_TTL_MS) continue; // spam guard
       sweepProximityNotified(now);
       proximityNotified.set(key, now);
-      io.to(online.socketId).emit('territory:proximity', { attackerUsername: attackerName });
+      io.to(`user:${oid}`).emit('territory:proximity', { attackerUsername: attackerName });
     }
   } catch { /* proximity — best-effort, hot path'ni bloklamaydi */ }
 }
@@ -104,7 +106,7 @@ function flushCheat(userId) {
   }
 }
 
-function handleLocation(io, socket, onlinePlayers) {
+function handleLocation(io, socket) {
   const { userId } = socket;
   let lastUpdateTime = 0;
   let lastValidPoint = null;
@@ -125,8 +127,6 @@ function handleLocation(io, socket, onlinePlayers) {
     // qilib, keyin bloklash qo'shiladi. Eski ilovalar `mocked` yubormaydi → undefined →
     // hech narsa loglanmaydi (to'liq orqaga moslik).
     if (data.mocked === true) {
-      // type 'gps_spoof' — admin paneli (AntiCheat.jsx) buni allaqachon "GPS spoof" deb ko'rsatadi.
-      // logCheat orqali — har 2s'da spam qator yaratmaydi, bitta incident count'i o'sadi.
       logCheat(userId, 'gps_spoof', { reason: 'shadow: mocked GPS (Android)', lat, lng });
     }
 
@@ -147,10 +147,9 @@ function handleLocation(io, socket, onlinePlayers) {
       logCheat(userId, 'teleport', { lat, lng });
     }
 
-    const player = onlinePlayers.get(userId);
-    if (player) { player.lat = lat; player.lng = lng; }
+    const player = onlineStore.updateLocalPosition(userId, lat, lng);
+    const teamId = player?.teamId || null;
 
-    const teamId = onlinePlayers.get(userId)?.teamId || null;
     if (teamId) {
       io.to(`team:${teamId}`).emit('player:moved', {
         userId, lat, lng, teamId,
@@ -162,11 +161,12 @@ function handleLocation(io, socket, onlinePlayers) {
     }
 
     // Ultra yaqinlashuv ogohlantirishi — fire-and-forget (await yo'q, hot path tez qoladi)
-    checkProximity(io, onlinePlayers, userId, lat, lng);
+    checkProximity(io, userId, lat, lng);
+
     // Admin komnataga ham yuboramiz — real-time monitoring uchun.
-    // Faqat admin ulangan bo'lsa payload yasaymiz: aks holda har o'yinchining har
-    // nuqtasi uchun bekorga obyekt yaratiladi (hot path — sekundiga ko'p marta).
-    if (io.sockets.adapter.rooms.get('admin')?.size) {
+    // Faqat admin kuzatayotgan bo'lsa payload yasaymiz (scale rejimida global hisob
+    // Redis'da, 5s kesh bilan): aks holda har nuqta uchun bekorga obyekt yaratiladi.
+    if (onlineStore.adminWatching()) {
       io.to('admin').emit('player:moved', {
         userId,
         lat,
@@ -177,13 +177,10 @@ function handleLocation(io, socket, onlinePlayers) {
       });
     }
 
-    if (!userTrails.has(userId)) userTrails.set(userId, []);
-    const trail = userTrails.get(userId);
-
     // relocate = mashina/transport tezligi (chit emas): trail uziladi (capture bo'lmasin),
     // lekin yuqorida LOG QILINMAYDI — faqat teleport (>50 m/s) va gps_spoof loglanadi.
     if (validation.teleport || validation.trailGap || validation.relocate) {
-      trail.length = 0;
+      trailStore.resetTrail(userId).catch(() => {});
       lastValidPoint = null;
       // Server trail uzildi — jamoadagilarning kartasida ham bu a'zoning chizig'i tozalansin
       // (aks holda eski (uzilgan) jamoa chizig'i osilib qoladi).
@@ -200,23 +197,21 @@ function handleLocation(io, socket, onlinePlayers) {
     }
     lastValidPoint = [lat, lng];
 
-    // Trail'ga nuqta qo'shamiz. (Avval har nuqtaga HMAC imzo qo'yilardi, lekin u hech qayerda
-    // tekshirilmasdi — faqat hot path'da CPU sarflardi. Olib tashlandi.)
-    trail.push([lat, lng]);
-
-    if (trail.length > constants.MAX_TRAIL_POINTS) {
-      // trail[0] (boshlanish nuqtasi) saqlanib qoladi — polygon yopilishi uchun kerak
-      trail.splice(1, trail.length - constants.MAX_TRAIL_POINTS);
-    }
+    // Trail'ga nuqta qo'shamiz — fire-and-forget: bitta Redis ulanishida buyruqlar
+    // FIFO tartibda boradi (yuqoridagi reset bilan tartib buzilmaydi); xotira rejimida sinxron.
+    trailStore.addPoint(userId, lat, lng).catch(() => {});
 
     // Lokatsiya + to'plangan masofani DB'ga vaqt bo'yicha yozamiz (har N soniyada bir marta).
-    // Avval har 3 nuqtada yozilardi (~6s) — endi LOCATION_PERSIST_INTERVAL_MS (15s).
     // Masofa pendingDistance'da to'planib turadi, shuning uchun kamroq yozsak ham yo'qolmaydi;
     // uzilish va SIGTERM'da qolgani baribir flush qilinadi.
     if (now - lastPersistTime >= constants.LOCATION_PERSIST_INTERVAL_MS) {
       lastPersistTime = now;
       const distToFlush = pendingDistance.get(userId) || 0;
       pendingDistance.set(userId, 0);
+
+      // Scale rejimi: onlayn yozuvning Redis ko'zgusini ham shu tickda yangilaymiz
+      // (qo'shimcha hot-path yuk yo'q; bitta instance rejimida bu no-op)
+      onlineStore.mirrorEntry(userId);
 
       const updateData = {
         lastLocation: { type: 'Point', coordinates: [lng, lat] },
@@ -233,26 +228,27 @@ function handleLocation(io, socket, onlinePlayers) {
     }
   });
 
-  socket.on('trail:get', () => {
-    socket.emit('trail:current', { trail: userTrails.get(userId) || [] });
+  socket.on('trail:get', async () => {
+    socket.emit('trail:current', { trail: await getUserTrail(userId) });
   });
 
-  socket.on('trail:reset', () => {
-    userTrails.set(userId, []);
+  socket.on('trail:reset', async () => {
+    await trailStore.resetTrail(userId);
     socket.emit('trail:current', { trail: [] });
     // Jamoadagilarda ham bu a'zoning chizig'i tozalansin (web capture / qo'lda reset)
-    const teamId = onlinePlayers.get(userId)?.teamId || null;
+    const teamId = onlineStore.getLocal(userId)?.teamId || null;
     if (teamId) io.to(`team:${teamId}`).emit('team:trailReset', { userId });
   });
 
-  socket.on('disconnect', () => {
-    // Reconnect race: yangi socket allaqachon faol bo'lsa, eski socketning kechikkan
-    // disconnect'i faol trailni o'chirmasin (yarim aylanib yurgan user trailini yo'qotardi).
-    const activeEntry = onlinePlayers.get(userId);
-    const isStale = !!(activeEntry && activeEntry.socketId !== socket.id);
+  socket.on('disconnect', async () => {
+    // Reconnect race: yangi socket allaqachon faol bo'lsa (shu YOKI boshqa instance'da —
+    // getMirror GLOBAL haqiqatni o'qiydi), eski socketning kechikkan disconnect'i
+    // faol trailni o'chirmasin.
+    const globalEntry = await onlineStore.getMirror(userId);
+    const isStale = !!(globalEntry && globalEntry.socketId !== socket.id);
 
     if (!isStale) {
-      userTrails.delete(userId);
+      trailStore.dropTrail(userId).catch(() => {});
       lastProximityAt.delete(userId);
     }
     flushCheat(userId);
@@ -267,15 +263,16 @@ function handleLocation(io, socket, onlinePlayers) {
   });
 }
 
-function getUserTrail(userId) {
-  return userTrails.get(userId) || [];
+// Trail o'qish — endi async (xotira yoki Redis, chaqiruvchi farqini sezmaydi)
+async function getUserTrail(userId) {
+  return trailStore.getTrail(userId);
 }
 
 // Capture muvaffaqiyatli bo'lgach server trailini tozalaydi — keyingi loop toza boshlanadi.
 // REST capture (territoryController) ham, socket capture (territoryHandler) ham shu
 // funksiyani chaqiradi — aks holda keyingi capture eski nuqtalarni qo'shib yuborardi.
-function resetUserTrail(userId) {
-  userTrails.set(userId, []);
+async function resetUserTrail(userId) {
+  return trailStore.resetTrail(userId);
 }
 
 // Graceful shutdown uchun: barcha yig'ilgan masofalarni DB ga yozadi

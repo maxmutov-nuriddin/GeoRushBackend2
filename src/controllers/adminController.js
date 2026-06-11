@@ -2,8 +2,10 @@ const bcrypt = require('bcryptjs');
 // Umumiy (yagona) Prisma instansi — har modulda alohida `new PrismaClient()` ulanish
 // pulini ko'paytirib, ko'p foydalanuvchida ulanishlarni tugatadi. Bitta pool ishlatamiz.
 const { prisma } = require('../config/database');
-const { getOnlinePlayers, setPlayerTeam } = require('../socket/index');
+const { setPlayerTeam } = require('../socket/index');
+const onlineStore = require('../services/onlineStore');
 const { TIERS } = require('../config/tiers');
+const { invalidateUserCache } = require('../middleware/auth');
 
 // ─── Dashboard stats ───────────────────────────────────────────────────────────
 async function getStats(req, res, next) {
@@ -203,13 +205,16 @@ async function banUser(req, res, next) {
       select: { id: true, username: true, isBanned: true, socketId: true }
     });
 
-    // Ban qilinayotgan user hozir online bo'lsa — socketini uzish
-    if (Boolean(banned) && user.socketId) {
+    // Ban qilinayotgan user hozir online bo'lsa — socketini uzish.
+    // user:{id} room orqali — Redis adapter bilan boshqa instance'dagi socket ham
+    // uziladi; bitta instance rejimida avvalgi bilan bir xil effekt.
+    invalidateUserCache(user.id);
+
+    if (Boolean(banned)) {
       const io = req.app.get('io');
-      const sock = io?.sockets?.sockets?.get(user.socketId);
-      if (sock) {
-        sock.emit('banned', { message: 'Akkaunt bloklangan' });
-        sock.disconnect(true);
+      if (io) {
+        io.to(`user:${user.id}`).emit('banned', { message: 'Akkaunt bloklangan' });
+        io.in(`user:${user.id}`).disconnectSockets(true);
       }
     }
 
@@ -229,6 +234,7 @@ async function toggleAdmin(req, res, next) {
       data: { isAdmin: Boolean(isAdmin) },
       select: { id: true, username: true, isAdmin: true }
     });
+    invalidateUserCache(user.id);
     res.json({ user: { ...user, _id: user.id } });
   } catch (err) { next(err); }
 }
@@ -278,6 +284,7 @@ async function deleteUser(req, res, next) {
     await prisma.team.updateMany({ where: { ownerId: userId }, data: { ownerId: null } });
 
     await prisma.user.delete({ where: { id: userId } });
+    invalidateUserCache(userId);
 
     const io = req.app.get('io');
     if (io) {
@@ -549,7 +556,9 @@ async function clearAntiCheatLogs(req, res, next) {
 // ─── Live Map ─────────────────────────────────────────────────────────────────
 async function getLiveMap(req, res, next) {
   try {
-    const socketMap = getOnlinePlayers();
+    // Scale rejimida barcha instance'lardagi onlayn o'yinchilar (Redis mirror);
+    // bitta instance rejimida — lokal Map (avvalgidek). 5000 — render chegarasi.
+    const socketMap = await onlineStore.getAllObject(5000);
 
     const [territories, recentLogs, onlineUsers, allEvents] = await Promise.all([
       prisma.territory.findMany({

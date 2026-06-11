@@ -1,7 +1,6 @@
 const { prisma } = require('../config/database');
 const { getTerritoriesInBounds, getUserTerritories, deleteTerritory, captureTerritory } = require('../services/territoryService');
 const { runPostCaptureEffects } = require('../services/captureEffects');
-const { getOnlinePlayersMap } = require('../socket');
 const { getUserTrail, resetUserTrail } = require('../socket/handlers/locationHandler');
 const { detectClosedPolygon } = require('../services/geoService');
 const { tierOf, entitlements } = require('../config/tiers');
@@ -117,7 +116,9 @@ async function captureFromRest(req, res, next) {
   try {
     const userId = String(req.user.id || req.user._id);
 
-    const trail = getUserTrail(userId);
+    // Scale rejimida trail Redis'da — REST so'rovi qaysi instance'ga tushishidan
+    // qat'i nazar topiladi; bitta instance rejimida xotiradan (avvalgidek).
+    const trail = await getUserTrail(userId);
     if (!Array.isArray(trail) || trail.length < 4) {
       return res.status(400).json({
         error: 'Yetarli GPS yo\'l yo\'q. Internet ulanishini tekshirib, biroz yurib qaytaring.',
@@ -130,25 +131,24 @@ async function captureFromRest(req, res, next) {
 
     const result = await captureTerritory(userId, polygon);
 
-    resetUserTrail(userId);
+    await resetUserTrail(userId);
 
     const io = req.app.get('io');
     let username = req.user.username;
     if (io) {
       const user = await prisma.user.findUnique({
         where: { id: userId },
-        select: { username: true, socketId: true, teamId: true }
+        select: { username: true, teamId: true }
       });
       username = user?.username || username;
 
       if (user?.teamId) io.to(`team:${user.teamId}`).emit('team:trailReset', { userId });
 
-      if (user?.socketId) {
-        io.to(user.socketId).emit('territory:captured', {
-          ...result,
-          message: `Territory captured! +${result.xpGained} XP`,
-        });
-      }
+      // user:{id} room — socket qaysi instance'da bo'lsa ham yetib boradi
+      io.to(`user:${userId}`).emit('territory:captured', {
+        ...result,
+        message: `Territory captured! +${result.xpGained} XP`,
+      });
 
       io.to('global').emit('territory:new', {
         territory: result.territory,
@@ -179,7 +179,6 @@ async function captureFromRest(req, res, next) {
         userId,
         username,
         result,
-        onlinePlayers: getOnlinePlayersMap(),
       }).catch((err) => logger.warn('Post-capture effects failed (REST)', { err: err.message }));
     }
   } catch (err) {

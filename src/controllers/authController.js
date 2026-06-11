@@ -13,6 +13,16 @@ function generateToken(userId, username) {
   });
 }
 
+const REFRESH_TOKEN_BYTES = 48; // 96 char hex
+const REFRESH_TOKEN_TTL_DAYS = 30;
+
+async function createRefreshToken(userId) {
+  const token = crypto.randomBytes(REFRESH_TOKEN_BYTES).toString('hex');
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+  await prisma.refreshToken.create({ data: { token, userId, expiresAt } });
+  return token;
+}
+
 function serializeUser(u) {
   return {
     id: u.id,
@@ -77,7 +87,8 @@ async function login(req, res, next) {
 
     recordSuccess(ip);
     const token = generateToken(user.id, user.username);
-    res.json({ token, user: serializeUser(user) });
+    const refreshToken = await createRefreshToken(user.id);
+    res.json({ token, refreshToken, user: serializeUser(user) });
   } catch (err) { next(err); }
 }
 
@@ -214,7 +225,8 @@ async function registerWithPhone(req, res, next) {
     await prisma.oTPSession.delete({ where: { id: session.id } });
 
     const token = generateToken(user.id, user.username);
-    res.status(201).json({ token, user: serializeUser(user) });
+    const refreshToken = await createRefreshToken(user.id);
+    res.status(201).json({ token, refreshToken, user: serializeUser(user) });
   } catch (err) { next(err); }
 }
 
@@ -249,7 +261,56 @@ async function resetPasswordWithPhone(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ─── Refresh token orqali yangi access token olish ───────────────────────────
+// POST /auth/token  { refreshToken }  → { token, refreshToken }
+// Eski refresh token o'chiriladi, yangi token beriladi (rotation).
+async function exchangeRefreshToken(req, res, next) {
+  try {
+    const { refreshToken: incoming } = req.body;
+    if (!incoming) return res.status(400).json({ error: 'refreshToken required' });
+
+    const record = await prisma.refreshToken.findUnique({ where: { token: incoming } });
+    if (!record || new Date() > record.expiresAt) {
+      // Eskirgan yoki topilmagan — ikkala holda ham o'chirib tashlaymiz
+      if (record) await prisma.refreshToken.delete({ where: { id: record.id } }).catch(() => {});
+      return res.status(401).json({ error: 'Refresh token yaroqsiz yoki muddati o\'tgan', code: 'REFRESH_INVALID' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: record.userId },
+      select: { id: true, username: true, isBanned: true }
+    });
+    if (!user) {
+      await prisma.refreshToken.delete({ where: { id: record.id } }).catch(() => {});
+      return res.status(401).json({ error: 'Foydalanuvchi topilmadi' });
+    }
+    if (user.isBanned) {
+      await prisma.refreshToken.delete({ where: { id: record.id } }).catch(() => {});
+      return res.status(403).json({ error: 'Akkaunt bloklangan', code: 'BANNED' });
+    }
+
+    // Rotation: eski token o'chiriladi, yangi beriladi
+    await prisma.refreshToken.delete({ where: { id: record.id } });
+    const newRefreshToken = await createRefreshToken(user.id);
+    const newAccessToken = generateToken(user.id, user.username);
+
+    res.json({ token: newAccessToken, refreshToken: newRefreshToken });
+  } catch (err) { next(err); }
+}
+
+// ─── Logout: refresh tokenni bekor qilish ─────────────────────────────────────
+// POST /auth/logout  { refreshToken }
+async function logout(req, res, next) {
+  try {
+    const { refreshToken: incoming } = req.body;
+    if (incoming) {
+      await prisma.refreshToken.deleteMany({ where: { token: incoming } });
+    }
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
-  login, getMe, refreshToken,
+  login, getMe, refreshToken, exchangeRefreshToken, logout,
   requestOtp, verifyOtp, registerWithPhone, resetPasswordWithPhone,
 };

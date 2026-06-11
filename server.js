@@ -92,6 +92,19 @@ const io = new Server(server, {
   maxHttpBufferSize: 1e6,
 });
 
+// ── Scale-out (ixtiyoriy): REDIS_URL berilsa Socket.IO Redis adapter yoqiladi ──
+// Shunda io.to(room).emit barcha instance'larga yetadi va bir nechta instance
+// parallel ishlay oladi. REDIS_URL yo'q bo'lsa — hech narsa o'zgarmaydi (bitta
+// instance, in-memory adapter, avvalgi xulq). Batafsil: SCALING.md
+const { isRedisEnabled, createRedisClient } = require('./src/config/redis');
+if (isRedisEnabled()) {
+  const { createAdapter } = require('@socket.io/redis-adapter');
+  const pubClient = createRedisClient('socket-pub');
+  const subClient = createRedisClient('socket-sub');
+  io.adapter(createAdapter(pubClient, subClient));
+  logger.info('Socket.IO Redis adapter yoqildi (scale-out rejimi)');
+}
+
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors(corsOptions));
 app.use(compression());

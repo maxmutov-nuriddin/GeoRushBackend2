@@ -216,17 +216,25 @@ async function initBot() {
     return null;
   }
 
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/deleteWebhook?drop_pending_updates=true`)
-      .then(r => r.json())
-      .then(r => logger.info('Webhook delete:', r.ok ? 'OK' : r.description))
-      .catch(e => logger.warn('Webhook delete skip:', e.message));
+  // Scale-out: Telegram bitta tokenga faqat BITTA polling iste'molchiga ruxsat beradi.
+  // Ko'p instance'da faqat bittasida polling qoladi (default: yoqilgan — bitta instance
+  // uchun hech narsa o'zgarmaydi), qolganlarida BOT_POLLING=false qo'yiladi — ular
+  // baribir xabar/invoice YUBORA OLADI (sendMessage/sendInvoice polling talab qilmaydi).
+  const pollingEnabled = process.env.BOT_POLLING !== 'false';
 
-    bot = new TelegramBot(token, { polling: true });
+  try {
+    if (pollingEnabled) {
+      await fetch(`https://api.telegram.org/bot${token}/deleteWebhook?drop_pending_updates=true`)
+        .then(r => r.json())
+        .then(r => logger.info('Webhook delete:', r.ok ? 'OK' : r.description))
+        .catch(e => logger.warn('Webhook delete skip:', e.message));
+    }
+
+    bot = new TelegramBot(token, { polling: pollingEnabled });
 
     const me = await bot.getMe();
     process.env.TELEGRAM_BOT_USERNAME = me.username;
-    logger.info(`OTP Bot ishga tushdi: @${me.username}`);
+    logger.info(`OTP Bot ishga tushdi: @${me.username}${pollingEnabled ? '' : ' (faqat yuborish — polling o\'chiq)'}`);
 
     const RECEIPT_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 soat
 

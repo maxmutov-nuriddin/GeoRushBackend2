@@ -15,9 +15,17 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 function getIp(req) {
-  // 'trust proxy' o'rnatilgani uchun Express req.ip ni to'g'ri hisoblaydi —
-  // eng o'ngdagi ishonchsiz hop (haqiqiy client). x-forwarded-for'ni qo'lda
-  // o'qib birinchi qiymatni olish spoof qilinadi (client soxta header yuborishi mumkin).
+  // Render X-Forwarded-For'ga real client IP'ni OXIRIGA qo'shadi (append).
+  // Client soxta header yuborsa u birinchi qiymat bo'lib qoladi; Render'ning
+  // qo'shgan haqiqiy IP esa har doim OXIRIDA turadi.
+  // req.ip (trust proxy 1) esa birinchi qiymatni beradi → spoof mumkin.
+  // Shuning uchun XFF'ning eng oxirgi qiymatini olamiz.
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) {
+    const parts = xff.split(',');
+    const last = parts[parts.length - 1].trim();
+    if (last) return last;
+  }
   return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 

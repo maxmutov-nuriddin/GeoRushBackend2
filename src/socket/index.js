@@ -1,68 +1,93 @@
 const { authenticateSocket } = require('../middleware/auth');
-const { handleLocation, getUserTrail } = require('./handlers/locationHandler');
+const { handleLocation } = require('./handlers/locationHandler');
 const { handleTerritory } = require('./handlers/territoryHandler');
+const { getTrail } = require('../services/trailStore');
+const onlineStore = require('../services/onlineStore');
 const { tierOf } = require('../config/tiers');
 const { removePlayer } = require('../services/antiCheatService');
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 
-// Online players: userId (string) -> { socketId, username, lat, lng, color, teamId, level }
-const onlinePlayers = new Map();
-
-function getOnlinePlayers() {
-  return Object.fromEntries(onlinePlayers);
-}
+// Eslatma (scale-out): har socket `user:{userId}` roomiga kiradi — shu tufayli
+// io.to(`user:X`).emit va io.in(`user:X`).socketsJoin(...) Redis adapter orqali
+// user qaysi instance'da bo'lsa ham yetib boradi. REDIS_URL'siz (bitta instance)
+// bularning hammasi avvalgidek lokal ishlaydi — xulq farqi yo'q.
 
 // players:init uchun jamoadagilarni har birining joriy yo'l chizig'i (trail) bilan qaytaradi —
 // shunda keyin ulangan a'zo mavjud jamoa chiziqlarini darrov ko'radi.
-function teammatesWithTrails(myTeamId, excludeId) {
-  return Object.fromEntries(
-    [...onlinePlayers]
-      .filter(([id, p]) => p.teamId === myTeamId && id !== excludeId)
-      .map(([id, p]) => [id, { ...p, trail: getUserTrail(id) }]),
-  );
+async function buildTeammatesWithTrails(myTeamId, excludeId) {
+  const members = await onlineStore.getTeamMembers(myTeamId, excludeId);
+  const out = {};
+  for (const [id, entry] of Object.entries(members)) {
+    out[id] = { ...entry, trail: await getTrail(id) };
+  }
+  return out;
 }
 
-// REST API orqali jamoa o'zgarganda socket roomni yangilash
+// REST API orqali jamoa o'zgarganda socket room va onlayn reestrni yangilash.
+// Sinxron chaqiriladi (await'siz) — ichidagi async ish xato bersa log qilinadi.
 function setPlayerTeam(io, userId, newTeamId) {
-  const player = onlinePlayers.get(userId);
-  if (!player) return;
+  applyTeamChange(io, userId, newTeamId)
+    .catch((err) => logger.error('setPlayerTeam failed', { userId, err: err.message }));
+}
 
-  const oldTeamId = player.teamId;
+async function applyTeamChange(io, userId, newTeamId) {
+  const entry = await onlineStore.get(userId);
 
-  // Eski team roomdan chiqish
+  // O'yinchi onlayn bo'lmasa ham mirror/team-set tozalansin (scale rejimida)
+  if (!entry) {
+    await onlineStore.setTeam(userId, newTeamId || null);
+    return;
+  }
+
+  const oldTeamId = entry.teamId || null;
+  const userRoom = `user:${userId}`;
+
+  // Eski team roomdan chiqarish — socketsLeave cross-instance ishlaydi
   if (oldTeamId) {
-    const sock = io.sockets.sockets.get(player.socketId);
-    if (sock) sock.leave(`team:${oldTeamId}`);
+    io.in(userRoom).socketsLeave(`team:${oldTeamId}`);
     io.to(`team:${oldTeamId}`).emit('player:left', { userId });
   }
 
-  player.teamId = newTeamId || null;
-
-  // Yangi team roomga kirish
-  if (newTeamId) {
-    const sock = io.sockets.sockets.get(player.socketId);
-    if (sock) {
-      sock.join(`team:${newTeamId}`);
-      // Yangi jamoa a'zolariga xabar
-      io.to(`team:${newTeamId}`).emit('player:joined', { userId, ...player });
-      // Yangi a'zoga mavjud jamoa a'zolarini (yo'l chiziqlari bilan) yuborish
-      const teammates = teammatesWithTrails(newTeamId, userId);
-      sock.emit('players:init', teammates);
+  // Lokal + Redis reestr; boshqa instance'lardagi lokal nusxa serverSideEmit orqali
+  await onlineStore.setTeam(userId, newTeamId || null);
+  try {
+    if (typeof io.serverSideEmit === 'function') {
+      io.serverSideEmit('gr:teamChange', { userId, teamId: newTeamId || null });
     }
+  } catch { /* adapter yo'q — bitta instance */ }
+
+  if (newTeamId) {
+    io.in(userRoom).socketsJoin(`team:${newTeamId}`);
+    // Yangi jamoa a'zolariga xabar
+    io.to(`team:${newTeamId}`).emit('player:joined', { userId, ...entry, teamId: newTeamId });
+    // Yangi a'zoga mavjud jamoa a'zolarini (yo'l chiziqlari bilan) yuborish
+    const teammates = await buildTeammatesWithTrails(newTeamId, userId);
+    io.to(userRoom).emit('players:init', teammates);
   } else {
     // Jamoa yo'q — bo'sh init yuborish
-    const sock = io.sockets.sockets.get(player.socketId);
-    if (sock) sock.emit('players:init', {});
+    io.to(userRoom).emit('players:init', {});
   }
 }
 
 function initializeSocket(io) {
   io.use(authenticateSocket);
 
+  // Boshqa instance jamoa o'zgarishini e'lon qilganda lokal nusxani yangilaymiz
+  // (faqat scale rejimida keladi; bitta instance'da bu event umuman bo'lmaydi)
+  io.on('gr:teamChange', ({ userId, teamId }) => {
+    onlineStore.setLocalTeam(userId, teamId || null);
+  });
+
+  // Redis rejimида: heartbeat + o'lik instance qoldiqlarini tozalash
+  onlineStore.startMaintenance();
+
   io.on('connection', async (socket) => {
     const { userId, username } = socket;
     logger.debug(`Player connected: ${username} (${userId})`);
+
+    // Cross-instance manzillash uchun shaxsiy room
+    socket.join(`user:${userId}`);
 
     try {
       const user = await prisma.user.findUnique({
@@ -87,9 +112,11 @@ function initializeSocket(io) {
       }
       if (user?.isAdmin) {
         socket.join('admin');
+        socket.data.isAdmin = true;
+        onlineStore.adminJoined();
       } else if (user) {
         const teamId = user.teamId?.toString() || null;
-        onlinePlayers.set(userId, {
+        onlineStore.addLocal(userId, {
           socketId: socket.id,
           username,
           lat: null,
@@ -117,28 +144,37 @@ function initializeSocket(io) {
     socket.join('global');
 
     // Faqat bir jamoadagilarni yuborish
-    const myTeamId = onlinePlayers.get(userId)?.teamId || null;
-    const teammates = myTeamId ? teammatesWithTrails(myTeamId, userId) : {};
+    const myTeamId = onlineStore.getLocal(userId)?.teamId || null;
+    const teammates = myTeamId ? await buildTeammatesWithTrails(myTeamId, userId) : {};
     socket.emit('players:init', teammates);
 
     if (myTeamId) {
-      socket.to(`team:${myTeamId}`).emit('player:joined', { userId, username, ...onlinePlayers.get(userId) });
+      socket.to(`team:${myTeamId}`).emit('player:joined', { userId, username, ...onlineStore.getLocal(userId) });
     }
 
-    handleLocation(io, socket, onlinePlayers);
-    handleTerritory(io, socket, onlinePlayers);
+    handleLocation(io, socket);
+    handleTerritory(io, socket);
 
     socket.on('disconnect', async (reason) => {
       logger.debug(`Player disconnected: ${username} — ${reason}`);
 
-      // Reconnect race himoyasi: yangi socket allaqachon ulangan bo'lsa (entry yangi
-      // socketId bilan almashgan), ESKI socketning kechikkan disconnect'i yangi
-      // ulanishni o'chirib yubormasin (isOnline=false, player:left, trail yo'qolishi).
-      const entry = onlinePlayers.get(userId);
-      if (entry && entry.socketId !== socket.id) return;
+      if (socket.data.isAdmin) onlineStore.adminLeft();
 
+      // Reconnect race himoyasi: yangi socket allaqachon ulangan bo'lsa (shu yoki
+      // BOSHQA instance'da — getMirror GLOBAL haqiqatni o'qiydi), eski socketning
+      // kechikkan disconnect'i yangi ulanishni o'chirib yubormasin.
+      const mirror = await onlineStore.getMirror(userId);
+      if (mirror && mirror.socketId !== socket.id) {
+        // User boshqa socketda davom etmoqda. Bizning lokal nusxa aynan shu eski
+        // socketniki bo'lsa — faqat lokalni tozalaymiz (mirror/trail/DB'ga tegmaymiz).
+        const localEntry = onlineStore.getLocal(userId);
+        if (localEntry && localEntry.socketId === socket.id) onlineStore.dropLocalOnly(userId);
+        return;
+      }
+
+      const entry = onlineStore.getLocal(userId) || mirror;
       const teamId = entry?.teamId || null;
-      onlinePlayers.delete(userId);
+      onlineStore.removeLocal(userId);
       removePlayer(userId);
 
       try {
@@ -155,10 +191,14 @@ function initializeSocket(io) {
   });
 }
 
-// Jonli (live) Map'ni qaytaradi — REST yo'lidagi capture effektlari onlayn holatni
-// DB'dagi (eskirishi mumkin bo'lgan) socketId emas, shu xotira manbasidan o'qiydi.
+// Avvalgi API bilan moslik: shu instance'dagi onlayn o'yinchilar (oddiy obyekt)
+function getOnlinePlayers() {
+  return Object.fromEntries(onlineStore.localEntries());
+}
+
+// Lokal jonli Map — faqat shu instance socketlari (hot path uchun)
 function getOnlinePlayersMap() {
-  return onlinePlayers;
+  return onlineStore.localEntries();
 }
 
 module.exports = { initializeSocket, getOnlinePlayers, getOnlinePlayersMap, setPlayerTeam };
