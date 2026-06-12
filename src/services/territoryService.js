@@ -1,8 +1,41 @@
 const { prisma } = require('../config/database');
-const { polygonAreaM2, toGeoJSONPolygon, estimateOverlapFraction, simplifyPolygon, pointInPolygon, segmentsIntersect } = require('./geoService');
+const { Prisma } = require('@prisma/client');
+const { polygonAreaM2, estimateOverlapFraction, simplifyPolygon, pointInPolygon, segmentsIntersect } = require('./geoService');
 const constants = require('../config/constants');
 const { tierOf, entitlements } = require('../config/tiers');
 const logger = require('../utils/logger');
+
+// Foydalanuvchining O'ZIGA tegishli, yangi poligon bilan tegib/ustma-ust tushgan
+// hududlarini PostGIS ST_Union orqali bitta umumiy poligonga birlashtiradi.
+// Faqat natija YAGONA Polygon bo'lsa qaytaradi (faqat nuqtada teggan → MultiPolygon →
+// birlashtirmaymiz, chunki renderlar coordinates[0] — bitta halqa kutadi).
+// PostGIS yo'q/xato bo'lsa null — chaqiruvchi eski xulqqa (birlashtirmaslik) qaytadi.
+async function unionWithOwn(newGeoJSONStr, ownTerritories) {
+  if (!ownTerritories.length) return null;
+  try {
+    const ids = ownTerritories.map(t => t.id);
+    const rows = await prisma.$queryRaw`
+      SELECT ST_AsGeoJSON(u) AS geojson, GeometryType(u) AS gtype, ST_Area(u::geography) AS area
+      FROM (
+        SELECT ST_Union(geom) AS u FROM (
+          SELECT ST_MakeValid(ST_GeomFromGeoJSON(${newGeoJSONStr})) AS geom
+          UNION ALL
+          SELECT ST_MakeValid(ST_GeomFromGeoJSON(polygon::text)) AS geom
+            FROM "Territory" WHERE id IN (${Prisma.join(ids)})
+        ) parts
+      ) j
+    `;
+    const row = rows && rows[0];
+    if (!row || !row.geojson) return null;
+    if (String(row.gtype || '').toUpperCase() !== 'POLYGON') return null;
+    const geom = JSON.parse(row.geojson);
+    if (!geom || geom.type !== 'Polygon' || !geom.coordinates || !geom.coordinates[0]) return null;
+    return { geoPolygon: geom, area: Number(row.area) || 0 };
+  } catch (err) {
+    logger.warn('Hudud union (PostGIS) — birlashtirilmadi:', (err.message || '').split('\n')[0]);
+    return null;
+  }
+}
 
 // Convert [[lat,lng],...] trail points to GeoJSON Polygon coordinates [[[lng,lat],...]]
 function trailToGeoJSON(points) {
@@ -55,18 +88,9 @@ async function captureTerritory(userId, rawPoints) {
   });
   if (!user) throw Object.assign(new Error('User not found'), { status: 404 });
 
-  // ── Hudud limiti (Free 3 / Pro 15 / Ultra ∞) ──────────────────────────────
+  // Hudud limiti (Free 3 / Pro 15 / Ultra ∞) — tekshiruv quyiroqda: o'z hududlari bilan
+  // BIRLASHADIGAN egallash hudud sonini OSHIRMAYDI, shuning uchun limitга qarshi emas.
   const myEnt = entitlements(tierOf(user));
-  if (Number.isFinite(myEnt.territoryLimit)) {
-    const ownedCount = await prisma.territory.count({ where: { ownerId: userId } });
-    if (ownedCount >= myEnt.territoryLimit) {
-      const err = new Error(`Hudud limiti to'ldi (${myEnt.territoryLimit}). Yangisini egallash uchun eskisini o'chiring.`);
-      err.status = 403;
-      err.code = 'TERRITORY_LIMIT';
-      err.limit = myEnt.territoryLimit;
-      throw err;
-    }
-  }
 
   const geoCoords = trailToGeoJSON(polygonPoints);
   const geoPolygon = { type: 'Polygon', coordinates: [geoCoords] };
@@ -96,6 +120,28 @@ async function captureTerritory(userId, rawPoints) {
     ...t,
     polygon: typeof t.polygon === 'string' ? JSON.parse(t.polygon) : t.polygon
   }));
+
+  // ── O'z hududlari bilan BIRLASHTIRISH ─────────────────────────────────────
+  // Yangi poligonga tegib/ustma-ust tushgan o'z hududlarini topamiz va ST_Union
+  // bilan bitta umumiy poligonga qo'shamiz. Birlashsa — eski o'z hududlar o'chiriladi.
+  const ownMergeCandidates = overlapping.filter(t => t.ownerId === userId);
+  const mergeResult = await unionWithOwn(geoPolygonStr, ownMergeCandidates);
+  const ownMergeList = mergeResult ? ownMergeCandidates : [];
+  const ownAreaSum = ownMergeList.reduce((s, t) => s + (t.area || 0), 0);
+  const finalGeoPolygon = mergeResult ? mergeResult.geoPolygon : geoPolygon;
+  const finalArea = mergeResult ? (mergeResult.area || area) : area;
+
+  // Hudud limiti — faqat YANGI (birlashmaydigan) hudud qo'shilganda qo'llanadi.
+  if (!mergeResult && Number.isFinite(myEnt.territoryLimit)) {
+    const ownedCount = await prisma.territory.count({ where: { ownerId: userId } });
+    if (ownedCount >= myEnt.territoryLimit) {
+      const err = new Error(`Hudud limiti to'ldi (${myEnt.territoryLimit}). Yangisini egallash uchun eskisini o'chiring.`);
+      err.status = 403;
+      err.code = 'TERRITORY_LIMIT';
+      err.limit = myEnt.territoryLimit;
+      throw err;
+    }
+  }
 
   // Premium egalarini topish uchun batch fetch
   const uniqueOwnerIds = [...new Set(
@@ -158,17 +204,29 @@ async function captureTerritory(userId, rawPoints) {
     stolenFrom = [];
     invasionNotifications = [];
 
-    // Yangi territory yaratish
+    // Yangi territory yaratish (birlashgan bo'lsa — umumiy poligon va maydon bilan)
     territory = await tx.territory.create({
       data: {
         ownerId: userId,
         teamId: user.teamId || null,
-        polygon: geoPolygon,
-        area,
+        polygon: finalGeoPolygon,
+        area: finalArea,
         color: user.color,
         capturedAt: new Date(),
       }
     });
+
+    // Birlashtirilgan O'Z eski hududlarini o'chiramiz (yangi umumiy poligon ularni qamraydi).
+    for (const own of ownMergeList) {
+      const del = await tx.territory.deleteMany({ where: { id: own.id } });
+      if (del.count === 0) continue;
+      if (own.teamId) {
+        await tx.team.update({
+          where: { id: own.teamId },
+          data: { totalArea: { decrement: own.area } }
+        }).catch(() => {});
+      }
+    }
 
     // Eski hududlarni o'chirish va statistikalarni yangilash
     for (const old of deletableList) {
@@ -198,11 +256,13 @@ async function captureTerritory(userId, rawPoints) {
       }
     }
 
-    // Foydalanuvchi va jamoa statistikalarini yangilash
+    // Foydalanuvchi va jamoa statistikalarini yangilash.
+    // Birlashganda: yangi umumiy maydon QO'SHILADI, birlashtirilgan eski o'z hududlar
+    // maydoni AYIRILADI (ustma-ust qism ikki marta sanalmasin). Birlashmasa ownAreaSum=0.
     await tx.user.update({
       where: { id: userId },
       data: {
-        totalArea: { increment: area },
+        totalArea: { increment: finalArea - ownAreaSum },
         territoriesCaptured: { increment: 1 },
         xp: { increment: xpGained },
         level: newLevel
@@ -210,9 +270,11 @@ async function captureTerritory(userId, rawPoints) {
     });
 
     if (user.teamId) {
+      // Yangi umumiy maydonni jamoaga qo'shamiz; birlashtirilgan o'z hududlar maydoni
+      // yuqorida ularning OWN teamId'sidan ayirilgan (odatda shu jamoa).
       await tx.team.update({
         where: { id: user.teamId },
-        data: { totalArea: { increment: area } }
+        data: { totalArea: { increment: finalArea } }
       });
     }
 
@@ -221,7 +283,7 @@ async function captureTerritory(userId, rawPoints) {
         type: 'territory_captured',
         actorId: userId,
         territoryId: territory.id,
-        data: { area, xpGained, stolenFrom }
+        data: { area: finalArea, xpGained, stolenFrom, merged: ownMergeList.length }
       }
     });
   });
@@ -265,8 +327,8 @@ async function captureTerritory(userId, rawPoints) {
       id: territory.id,
       ownerId: userId,
       teamId: user.teamId || null,
-      polygon: toGeoJSONPolygon(polygonPoints),
-      area,
+      polygon: finalGeoPolygon,
+      area: finalArea,
       color: user.color,
       capturedAt: territory.capturedAt,
     },
@@ -278,6 +340,8 @@ async function captureTerritory(userId, rawPoints) {
     neighborNotifications,
     oldLevel: user.level,
     premiumBonus: xpMultiplier > 1,
+    // Birlashtirilgan (o'chirilgan) o'z hududlar id'lari — mijoz kartadan olib tashlaydi
+    mergedFrom: ownMergeList.map(t => t.id),
   };
 }
 

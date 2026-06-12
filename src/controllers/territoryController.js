@@ -161,6 +161,13 @@ async function captureFromRest(req, res, next) {
         xpGained: result.xpGained,
         stolenFrom: result.stolenFrom,
       });
+
+      // Birlashtirilgan o'z eski hududlari — barcha mijozlar kartadan olib tashlasin
+      if (Array.isArray(result.mergedFrom) && result.mergedFrom.length) {
+        for (const removedId of result.mergedFrom) {
+          io.to('global').emit('territory:removed', { territoryId: removedId });
+        }
+      }
     }
 
     res.json({
