@@ -1,14 +1,21 @@
 const { prisma } = require('../config/database');
 const polygonClipping = require('polygon-clipping');
+const turfBuffer = require('@turf/buffer').default || require('@turf/buffer');
+const { polygon: turfPolygon, multiPolygon: turfMultiPolygon } = require('@turf/helpers');
 const { polygonAreaM2 } = require('./geoService');
 const logger = require('../utils/logger');
 
 // Bir martalik backfill: HAR BIR foydalanuvchining bir-biriga tegib/ustma-ust tushgan
 // O'Z hududlarini bitta umumiy poligonga birlashtiradi (faqat ownerId bo'yicha — boshqa
-// odam zonalariga tegmaydi). Capture-time birlashtirish kelajakdagi egallashlar uchun,
-// bu esa MAVJUD (eski) ma'lumotni tozalaydi. Idempotent: birlashtirilgach qayta o'zgartirmaydi.
+// odam zonalariga tegmaydi). Idempotent: birlashtirilgach qayta o'zgartirmaydi.
+//
+// TOLERANTLIK: GPS aniqligi sabab "tegib turgan" zonalar orasida kichik bo'shliq bo'ladi.
+// Shuning uchun morfologik "close" ishlatamiz: har poligonni HALF ga kengaytirib (buffer),
+// birlashtirib, keyin -HALF ga qaytaramiz → ~TOLERANCE_M gacha bo'shliqlar ko'priklanadi.
 
-const FLAG_KEY = 'territory_merge_backfill_v1';
+const FLAG_KEY = 'territory_merge_backfill_v2'; // v2 — tolerantlik qo'shildi, qayta ishlasin
+const TOLERANCE_M = Number(process.env.TERRITORY_MERGE_TOLERANCE_M || 4); // ~4m bo'shliq ko'prigi
+const HALF_KM = (TOLERANCE_M / 2) / 1000;
 
 function coordsOf(t) {
   try {
@@ -17,11 +24,44 @@ function coordsOf(t) {
   } catch { return null; }
 }
 
-function connected(a, b) {
+// Poligon coords ([ring,...]) → buffered, polygon-clipping MultiPolygon shaklida ([[ring,...],...])
+function bufferToMulti(coords, km) {
   try {
-    const r = polygonClipping.intersection(a, b);
-    return Array.isArray(r) && r.length > 0;
-  } catch { return false; }
+    const f = turfBuffer(turfPolygon(coords), km, { units: 'kilometers' });
+    if (!f || !f.geometry) return null;
+    return f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+  } catch { return null; }
+}
+
+// Tolerantlik bilan ulanish: buffered (HALF) versiyalari kesishsa → orada <=TOLERANCE_M bo'shliq.
+function connectedTol(ba, bb, a, b) {
+  if (ba && bb) {
+    try { const r = polygonClipping.intersection(ba, bb); if (Array.isArray(r) && r.length > 0) return true; } catch {}
+  }
+  try { const r = polygonClipping.intersection(a, b); return Array.isArray(r) && r.length > 0; } catch { return false; }
+}
+
+// Komponentni morfologik "close" bilan birlashtiradi: buffered'larni union qilib, -HALF qaytaradi.
+// Natija YAGONA Polygon coords ([ring,...]) bo'lsa qaytaradi, aks holda oddiy union'ga qaytadi.
+function closeMerge(polys, bufs) {
+  // 1) buffered union → deflate
+  if (bufs.length === polys.length && bufs.every(Boolean)) {
+    try {
+      const u = polygonClipping.union(...bufs); // MultiPolygon
+      const geom = u.length === 1 ? turfPolygon(u[0]) : turfMultiPolygon(u);
+      const d = turfBuffer(geom, -HALF_KM, { units: 'kilometers' });
+      if (d && d.geometry) {
+        if (d.geometry.type === 'Polygon') return d.geometry.coordinates;
+        if (d.geometry.type === 'MultiPolygon' && d.geometry.coordinates.length === 1) return d.geometry.coordinates[0];
+      }
+    } catch {}
+  }
+  // 2) fallback — oddiy union (tolerantliksiz)
+  try {
+    const res = polygonClipping.union(...polys);
+    if (Array.isArray(res) && res.length === 1) return res[0];
+  } catch {}
+  return null;
 }
 
 // Asosiy mantiq. apply=false → faqat hisoblaydi (dry-run), bazani o'zgartirmaydi.
@@ -41,15 +81,17 @@ async function mergeAllOwnTerritories({ apply = false } = {}) {
     if (terrs.length < 2) continue;
 
     const coords = terrs.map(coordsOf);
+    // Buffered (HALF) versiyalar — tolerantlikли ulanish va close uchun (bir marta hisoblanadi)
+    const buffered = coords.map(c => (c ? bufferToMulti(c, HALF_KM) : null));
 
-    // Union-Find — kesishuvchi hududlarni komponentlarga ajratamiz
+    // Union-Find — tolerantlik bilan ulangan hududlarni komponentlarga ajratamiz
     const n = terrs.length;
     const parent = Array.from({ length: n }, (_, i) => i);
     const find = (x) => (parent[x] === x ? x : (parent[x] = find(parent[x])));
     const unite = (a, b) => { parent[find(a)] = find(b); };
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
-        if (coords[i] && coords[j] && connected(coords[i], coords[j])) unite(i, j);
+        if (coords[i] && coords[j] && connectedTol(buffered[i], buffered[j], coords[i], coords[j])) unite(i, j);
       }
     }
     const comps = {};
@@ -61,11 +103,10 @@ async function mergeAllOwnTerritories({ apply = false } = {}) {
       if (idxs.length < 2) continue;
 
       const polys = idxs.map(i => coords[i]).filter(Boolean);
-      let res;
-      try { res = polygonClipping.union(...polys); } catch { skipped++; continue; }
-      if (!Array.isArray(res) || res.length !== 1) { skipped++; continue; }
+      const bufs = idxs.map(i => buffered[i]).filter(Boolean);
+      const mergedCoords = closeMerge(polys, bufs);
+      if (!mergedCoords || !mergedCoords[0]) { skipped++; continue; }
 
-      const mergedCoords = res[0];
       const ringLatLng = mergedCoords[0].map(([lng, lat]) => [lat, lng]);
       const mergedArea = polygonAreaM2(ringLatLng);
 
