@@ -14,6 +14,9 @@ npm-debug.log*
 # Build
 dist/
 
+# Vaqtinchalik test/diagnostika skriptlari (lokal sinovlar uchun, push qilinmaydi)
+_*.js
+
 # OS
 .DS_Store
 Thumbs.db
