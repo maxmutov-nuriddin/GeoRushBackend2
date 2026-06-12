@@ -14,7 +14,15 @@ async function getPlayerLeaderboard(req, res, next) {
 
     let filter = { isAdmin: false };
     let scope = 'global';
-    if (reqScope === 'city' || reqScope === 'country') {
+    if (reqScope === 'friends') {
+      // Do'stlar reytingi — barcha tierlar uchun ochiq. Faqat do'stlar + o'zim.
+      // Global cache yo'liga tushmaydi (scope 'global' emas), shuning uchun
+      // mavjud cache xulqi mutlaqo o'zgarmaydi.
+      const { getFriendIds } = require('./friendController');
+      const friendIds = await getFriendIds(req.user.id);
+      filter.id = { in: [...friendIds, req.user.id] };
+      scope = 'friends';
+    } else if (reqScope === 'city' || reqScope === 'country') {
       const me = await prisma.user.findUnique({
         where: { id: req.user.id },
         select: { isPremium: true, premiumUntil: true, premiumTier: true, city: true, country: true }

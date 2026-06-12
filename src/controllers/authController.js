@@ -210,7 +210,7 @@ async function registerWithPhone(req, res, next) {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { username, phone, password, otpToken, color = '#00ff88' } = req.body;
+    const { username, phone, password, otpToken, color = '#00ff88', referralCode } = req.body;
 
     const session = await prisma.oTPSession.findFirst({
       where: {
@@ -238,6 +238,13 @@ async function registerWithPhone(req, res, next) {
     });
 
     await prisma.oTPSession.delete({ where: { id: session.id } });
+
+    // Referral kodi ixtiyoriy: fire-and-forget, await YO'Q — registratsiya javobini
+    // kutdirmaydi va hech qachon buzmaydi (funksiya ichida o'zi try/catch qiladi).
+    if (referralCode) {
+      const { attachReferralOnRegister } = require('./referralController');
+      attachReferralOnRegister(user.id, referralCode);
+    }
 
     const token = generateToken(user.id, user.username);
     const refreshToken = await createRefreshToken(user.id);

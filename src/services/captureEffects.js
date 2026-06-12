@@ -159,6 +159,14 @@ async function runPostCaptureEffects({ io, userId, username, result, capturerSoc
   try {
     await handleLevelUp(io, { userId, username: attackerUsername, result, capturerSocket });
   } catch (err) { logger.warn('Level-up effects failed', { err: err.message }); }
+
+  // Referral: bu userning birinchi capture'i bo'lsa, taklif mukofotlarini beradi.
+  // Lazy require — referralController bu fayldan sendExpoPush oladi, top-level
+  // require qilinsa circular dependency'da bo'sh export kelib qolardi.
+  try {
+    const { completeReferralIfPending } = require('../controllers/referralController');
+    await completeReferralIfPending({ userId, io });
+  } catch (err) { logger.warn('Referral reward failed', { err: err.message }); }
 }
 
 module.exports = { runPostCaptureEffects, sendExpoPush };

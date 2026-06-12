@@ -61,6 +61,64 @@ async function ensureCoreTables() {
            FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
        END IF;
      END $$`,
+
+    // Friendship — do'stlik so'rovlari/aloqalari (schema.prisma'dagi Friendship modeli).
+    // "updatedAt"ga DEFAULT beramiz: Prisma client o'zi to'ldiradi, lekin qo'lda
+    // INSERT (masalan SQL konsolda) ham yiqilmasin.
+    `CREATE TABLE IF NOT EXISTS "Friendship" (
+       "id"          TEXT NOT NULL,
+       "requesterId" TEXT NOT NULL,
+       "addresseeId" TEXT NOT NULL,
+       "status"      TEXT NOT NULL DEFAULT 'pending',
+       "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       "updatedAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "Friendship_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Friendship_requesterId_addresseeId_key" ON "Friendship" ("requesterId", "addresseeId")`,
+    `CREATE INDEX IF NOT EXISTS "Friendship_addresseeId_status_idx" ON "Friendship" ("addresseeId", "status")`,
+    `CREATE INDEX IF NOT EXISTS "Friendship_requesterId_status_idx" ON "Friendship" ("requesterId", "status")`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Friendship_requesterId_fkey') THEN
+         ALTER TABLE "Friendship"
+           ADD CONSTRAINT "Friendship_requesterId_fkey"
+           FOREIGN KEY ("requesterId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Friendship_addresseeId_fkey') THEN
+         ALTER TABLE "Friendship"
+           ADD CONSTRAINT "Friendship_addresseeId_fkey"
+           FOREIGN KEY ("addresseeId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
+
+    // Referral — taklif (schema.prisma'dagi Referral modeli). refereeId UNIQUE:
+    // bir foydalanuvchi faqat bir marta taklif qilinadi.
+    `CREATE TABLE IF NOT EXISTS "Referral" (
+       "id"         TEXT NOT NULL,
+       "referrerId" TEXT NOT NULL,
+       "refereeId"  TEXT NOT NULL,
+       "status"     TEXT NOT NULL DEFAULT 'pending',
+       "rewardedAt" TIMESTAMP(3),
+       "createdAt"  TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "Referral_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Referral_refereeId_key" ON "Referral" ("refereeId")`,
+    `CREATE INDEX IF NOT EXISTS "Referral_referrerId_status_idx" ON "Referral" ("referrerId", "status")`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Referral_referrerId_fkey') THEN
+         ALTER TABLE "Referral"
+           ADD CONSTRAINT "Referral_referrerId_fkey"
+           FOREIGN KEY ("referrerId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Referral_refereeId_fkey') THEN
+         ALTER TABLE "Referral"
+           ADD CONSTRAINT "Referral_refereeId_fkey"
+           FOREIGN KEY ("refereeId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
   ];
 
   let ok = 0;

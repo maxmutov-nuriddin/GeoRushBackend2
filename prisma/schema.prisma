@@ -64,6 +64,12 @@ model User {
   warningsGiven       Warning[]    @relation("WarningsGiven")
   managedTeams        Team[]       @relation("TeamMarkerAdmins")
   refreshTokens       RefreshToken[]
+  // Virtual back-relations — bazada ustun YARATMAYDI (faqat Prisma client typing).
+  // MUHIM: User'ga scalar ustun qo'shish migration'siz login'ni buzadi — bular bunday emas.
+  friendRequestsSent     Friendship[] @relation("FriendRequestsSent")
+  friendRequestsReceived Friendship[] @relation("FriendRequestsReceived")
+  referralsMade          Referral[]   @relation("ReferralsMade")
+  referralReceived       Referral?    @relation("ReferralReceived")
 }
 
 model RefreshToken {
@@ -75,6 +81,40 @@ model RefreshToken {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// Do'stlik: bitta juftlik = bitta qator. requester so'rov yuborgan, addressee qabul qiluvchi.
+// status: "pending" → "accepted". Rad etish/bekor qilish = qatorni o'chirish.
+// Jadval prod bazada ensureCoreTables() orqali yaratiladi (db push ISHLATILMAYDI).
+model Friendship {
+  id          String   @id @default(uuid())
+  requesterId String
+  addresseeId String
+  status      String   @default("pending") // "pending" | "accepted"
+  requester   User     @relation("FriendRequestsSent", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee   User     @relation("FriendRequestsReceived", fields: [addresseeId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status])
+  @@index([requesterId, status])
+}
+
+// Referral: referee ro'yxatdan o'tishda referrer kodini (username) kiritgan.
+// status "pending" → referee BIRINCHI hududini egallaganda "completed" bo'lib,
+// ikkala tomonga coin tushadi. Bir user faqat bir marta taklif qilinadi (refereeId unique).
+model Referral {
+  id         String    @id @default(uuid())
+  referrerId String
+  refereeId  String    @unique
+  status     String    @default("pending") // "pending" | "completed"
+  rewardedAt DateTime?
+  referrer   User      @relation("ReferralsMade", fields: [referrerId], references: [id], onDelete: Cascade)
+  referee    User      @relation("ReferralReceived", fields: [refereeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+
+  @@index([referrerId, status])
 }
 
 model Team {
