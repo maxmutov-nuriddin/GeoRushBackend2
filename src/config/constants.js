@@ -18,7 +18,10 @@ module.exports = {
   TERRITORY_MAX_AREA_M2: 5_000_000, // Max 5 km²
   MAX_TRAIL_POINTS: parseInt(process.env.MAX_TRAIL_POINTS || '5000'),
   MIN_TRAIL_POINTS_FOR_POLYGON: 4,
-  POLYGON_SIMPLIFY_TOLERANCE: 0.000005, // ~0.5m
+  // ~2m — GPS jitter/zigzag (shovqin)ni tozalaydi, chekka tekis chiqadi. Avval ~0.5m edi:
+  // juda mayda bo'lgani uchun shovqin nuqtalar o'tib ketib, hudud chekkasi tikanli ko'rinardi.
+  // Shakl va maydon (area) deyarli o'zgarmaydi — faqat ortiqcha sachragan nuqtalar olib tashlanadi.
+  POLYGON_SIMPLIFY_TOLERANCE: parseFloat(process.env.POLYGON_SIMPLIFY_TOLERANCE || '0.00002'),
 
   // XP rewards
   XP_PER_100M2: 10,
