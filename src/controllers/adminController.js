@@ -7,6 +7,7 @@ const onlineStore = require('../services/onlineStore');
 const { TIERS } = require('../config/tiers');
 const { invalidateUserCache } = require('../middleware/auth');
 const { recordPremiumPurchase, discountedSom, baseSomFor } = require('../services/premiumLedger');
+const { mergeAllOwnTerritories } = require('../services/territoryMergeBackfill');
 
 // ─── Dashboard stats ───────────────────────────────────────────────────────────
 async function getStats(req, res, next) {
@@ -865,6 +866,16 @@ async function changePassword(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// Hudud birlashtirish — qo'lda ishga tushirish (Shell kerak emas).
+// ?apply=true → haqiqiy birlashtirish; aks holda DRY-RUN (faqat hisobot).
+async function mergeTerritories(req, res, next) {
+  try {
+    const apply = req.query.apply === 'true' || req.body?.apply === true;
+    const stats = await mergeAllOwnTerritories({ apply });
+    res.json({ apply, ...stats });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   getStats, getUsers, getUser, updateUser, banUser, toggleAdmin, deleteUser,
   getUserWarnings, addWarning, deleteWarning, getUserActivity,
@@ -876,5 +887,6 @@ module.exports = {
   getAnalytics,
   getEconomy, seasonReset,
   giveCoins, givePremium, removePremium,
+  mergeTerritories,
   getMe, updateMe, verifyPassword, changePassword,
 };

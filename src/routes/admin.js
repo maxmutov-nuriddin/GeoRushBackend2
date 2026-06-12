@@ -45,6 +45,7 @@ router.get('/users/:id/anticheat',         c.getUserAntiCheat);
 
 // ─── Territories ──────────────────────────────────────────────────────────────
 router.get('/territories',                 c.getTerritories);
+router.post('/territories/merge',          c.mergeTerritories); // ?apply=true → birlashtiradi
 router.delete('/territories/:id',          c.deleteTerritory);
 router.get('/territories/:id/history',     c.getTerritoryHistory);
 
