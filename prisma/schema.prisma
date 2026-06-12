@@ -271,3 +271,22 @@ model PromoCode {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
+
+// Har bir HAQIQIY premium xaridi — chegirmadan keyingi to'langan summa shu yerga yoziladi.
+// Admin daromad statistikasi (taxminiy emas) shu jadvaldan hisoblanadi.
+model PremiumPurchase {
+  id          String   @id @default(uuid())
+  userId      String
+  tier        String   // 'pro' | 'ultra'
+  period      String   // 'monthly' | 'yearly'
+  method      String   // 'stars' | 'card' | 'revenuecat'
+  amountSom   Int      @default(0)  // chegirmadan keyin haqiqatda to'langan so'm
+  amountStars Int      @default(0)  // Stars to'lovida — haqiqatda to'langan Stars
+  baseSom     Int      @default(0)  // chegirmasiz to'liq narx (so'm)
+  discountPct Int      @default(0)  // qo'llanilgan chegirma foizi
+  promoCode   String?  // ishlatilgan promokod (bo'lsa)
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+}

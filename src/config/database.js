@@ -119,6 +119,25 @@ async function ensureCoreTables() {
            FOREIGN KEY ("refereeId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
        END IF;
      END $$`,
+
+    // PremiumPurchase — har bir HAQIQIY premium xaridi (chegirmadan keyingi summa).
+    // Admin daromad statistikasi taxminiy emas, shu jadvaldan hisoblanadi.
+    `CREATE TABLE IF NOT EXISTS "PremiumPurchase" (
+       "id"          TEXT NOT NULL,
+       "userId"      TEXT NOT NULL,
+       "tier"        TEXT NOT NULL,
+       "period"      TEXT NOT NULL,
+       "method"      TEXT NOT NULL,
+       "amountSom"   INTEGER NOT NULL DEFAULT 0,
+       "amountStars" INTEGER NOT NULL DEFAULT 0,
+       "baseSom"     INTEGER NOT NULL DEFAULT 0,
+       "discountPct" INTEGER NOT NULL DEFAULT 0,
+       "promoCode"   TEXT,
+       "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "PremiumPurchase_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE INDEX IF NOT EXISTS "PremiumPurchase_createdAt_idx" ON "PremiumPurchase" ("createdAt")`,
+    `CREATE INDEX IF NOT EXISTS "PremiumPurchase_userId_idx" ON "PremiumPurchase" ("userId")`,
   ];
 
   let ok = 0;

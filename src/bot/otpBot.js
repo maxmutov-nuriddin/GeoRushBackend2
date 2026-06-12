@@ -6,6 +6,7 @@ const { prisma }   = require('../config/database');
 // welcomeCoins kabi qiymatlar uchun YAGONA manba — tiers.js. Avval bu faylda 350/1000
 // hardcode edi, admin panel esa tiers'dagi 2500/7500 berardi — bir xil narxga har xil bonus.
 const { TIERS }    = require('../config/tiers');
+const { recordPremiumPurchase } = require('../services/premiumLedger');
 
 // DB-backed yordamchi funksiyalar (server restart bo'lsa ham saqlanadi)
 async function setPending(chatId, type, windowMs) {
@@ -229,6 +230,22 @@ async function handleSuccessfulPayment(msg) {
         premiumIsGift: false, // real to'lov — statistika/daromad hisobida qatnashadi
         coins: { increment: coinsBonus },
       }
+    });
+
+    // Haqiqiy to'lov ledger'ga — chegirma actual to'langan Stars'dan aniqlanadi
+    // (welcome + promo, ikkalasi ham finalStars ichida hisobga olingan).
+    const starKey   = period === 'yearly' ? `${tier}_yearly` : tier;
+    const baseStars = TIER_STARS[starKey] || TIER_STARS[tier] || 150;
+    const paidStars = Number(payment.total_amount) || 0;
+    const discountPct = baseStars > 0
+      ? Math.max(0, Math.min(100, Math.round((1 - paidStars / baseStars) * 100)))
+      : 0;
+    await recordPremiumPurchase({
+      userId: payload.userId, tier, period, method: 'stars',
+      amountStars: paidStars,
+      amountSom: calculateSomPrice(tier, period, discountPct),
+      baseSom: calculateSomPrice(tier, period, 0),
+      discountPct, promoCode,
     });
 
     const until = premiumUntil.toLocaleDateString('uz-UZ');

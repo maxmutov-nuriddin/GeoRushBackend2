@@ -6,6 +6,7 @@ const { setPlayerTeam } = require('../socket/index');
 const onlineStore = require('../services/onlineStore');
 const { TIERS } = require('../config/tiers');
 const { invalidateUserCache } = require('../middleware/auth');
+const { recordPremiumPurchase, discountedSom, baseSomFor } = require('../services/premiumLedger');
 
 // ─── Dashboard stats ───────────────────────────────────────────────────────────
 async function getStats(req, res, next) {
@@ -23,7 +24,7 @@ async function getStats(req, res, next) {
       newToday, newYesterday, newWeek, newMonth,
       premiumTotal, premiumPro, premiumUltra,
       premiumWeek, premiumMonth,
-      coinsResult,
+      coinsResult, revPurchase,
     ] = await Promise.all([
       prisma.user.count({ where: { isAdmin: false } }),
       prisma.user.count({ where: { isBanned: true } }),
@@ -47,6 +48,8 @@ async function getStats(req, res, next) {
       prisma.user.count({ where: { isPremium: true, updatedAt: { gte: month } } }),
       // Coins iqtisodi
       prisma.user.aggregate({ _sum: { coins: true } }),
+      // HAQIQIY daromad — chegirmadan keyingi to'langan summalar yig'indisi
+      prisma.premiumPurchase.aggregate({ _sum: { amountSom: true, amountStars: true } }).catch(() => null),
     ]);
 
     // Taxminiy daromad (so'm)
@@ -65,6 +68,9 @@ async function getStats(req, res, next) {
       // Daromad (taxminiy — hozirgi aktiv obunalar asosida)
       estimatedRevenueSom,
       estimatedRevenueStars,
+      // HAQIQIY daromad — chegirmadan keyingi haqiqatda to'langan summalar
+      realRevenueSom:   revPurchase?._sum?.amountSom   || 0,
+      realRevenueStars: revPurchase?._sum?.amountStars || 0,
       totalCoinsInCirculation: coinsResult._sum.coins || 0,
     });
   } catch (err) { next(err); }
@@ -162,6 +168,24 @@ async function givePremium(req, res, next) {
       data: updateDoc,
       select: { id: true, username: true, isPremium: true, premiumUntil: true, premiumTier: true, coins: true }
     });
+
+    // Sovg'a (bonus) emas — HAQIQIY xarid (odatda karta orqali chek bilan).
+    // Admin chekdagi chegirmali summani `paidAmount` bilan yuboradi; yuborilmasa
+    // chegirma foizidan yoki to'liq narxdan hisoblanadi. Daromad ledger'iga yoziladi.
+    if (!isBonus) {
+      const period   = days >= 365 ? 'yearly' : 'monthly';
+      const discountPct = Math.max(0, Math.min(100, Number(req.body.discountPct) || 0));
+      const promoCode = req.body.promoCode ? String(req.body.promoCode) : null;
+      const baseSom   = baseSomFor(tier, period);
+      const amountSom = req.body.paidAmount != null
+        ? Math.max(0, Math.round(Number(req.body.paidAmount)) || 0)
+        : discountedSom(tier, period, discountPct);
+      await recordPremiumPurchase({
+        userId: user.id, tier, period, method: 'card',
+        amountSom, baseSom, discountPct, promoCode,
+      });
+    }
+
     res.json({ ok: true, user: { ...user, _id: user.id }, addedDays: days, tier, isBonus, coinsGiven: welcomeCoins });
   } catch (err) { next(err); }
 }
@@ -709,6 +733,7 @@ async function getEconomy(req, res, next) {
     const [
       xpResult, coinsResult, topXp, topArea, topDist, topCoins,
       premiumPro, premiumUltra, premiumNew7d, premiumNew30d,
+      revAll, revMonth,
     ] = await Promise.all([
       prisma.user.aggregate({ _sum: { xp: true } }),
       prisma.user.aggregate({ _sum: { coins: true } }),
@@ -720,6 +745,8 @@ async function getEconomy(req, res, next) {
       prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra', premiumIsGift: false } }),
       prisma.user.count({ where: { isPremium: true, updatedAt: { gte: week } } }),
       prisma.user.count({ where: { isPremium: true, updatedAt: { gte: month } } }),
+      prisma.premiumPurchase.aggregate({ _sum: { amountSom: true, amountStars: true } }).catch(() => null),
+      prisma.premiumPurchase.aggregate({ where: { createdAt: { gte: month } }, _sum: { amountSom: true, amountStars: true } }).catch(() => null),
     ]);
 
     const revSom   = premiumPro * 39900 + premiumUltra * 79900;
@@ -739,6 +766,11 @@ async function getEconomy(req, res, next) {
       premiumNew7d, premiumNew30d,
       estimatedRevenueSom: revSom,
       estimatedRevenueStars: revStars,
+      // HAQIQIY daromad — chegirmadan keyingi to'langan summalar yig'indisi (PremiumPurchase)
+      realRevenueSom:    revAll?._sum?.amountSom   || 0,
+      realRevenueStars:  revAll?._sum?.amountStars || 0,
+      realRevenueSom30d: revMonth?._sum?.amountSom   || 0,
+      realRevenueStars30d: revMonth?._sum?.amountStars || 0,
     });
   } catch (err) { next(err); }
 }
