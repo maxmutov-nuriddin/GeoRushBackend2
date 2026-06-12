@@ -26,6 +26,7 @@ const { initializeSocket } = require('./src/socket');
 const { setIo } = require('./src/socket/ioInstance');
 const { flushAllPendingDistances } = require('./src/socket/handlers/locationHandler');
 const { initBot } = require('./src/bot/otpBot');
+const { runMergeBackfillOnce } = require('./src/services/territoryMergeBackfill');
 const authRoutes = require('./src/routes/auth');
 const userRoutes = require('./src/routes/users');
 const territoryRoutes = require('./src/routes/territories');
@@ -172,6 +173,10 @@ async function start() {
     // Eskirgan refresh tokenlar — darrov bir marta, keyin kuniga bir marta.
     sweepExpiredRefreshTokens();
     setInterval(sweepExpiredRefreshTokens, REFRESH_SWEEP_INTERVAL_MS).unref();
+
+    // Mavjud zonalarni bir marta avtomatik birlashtirish (fonda — boot'ni bloklamaydi).
+    // SystemFlag bilan faqat bir marta ishlaydi. TERRITORY_AUTO_MERGE=false bilan o'chadi.
+    runMergeBackfillOnce().catch((err) => logger.warn('Hudud birlashtirish (boot) xatosi:', err.message));
 
     server.listen(PORT, () => {
       logger.info(`GeoRush server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);

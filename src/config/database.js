@@ -138,6 +138,13 @@ async function ensureCoreTables() {
      )`,
     `CREATE INDEX IF NOT EXISTS "PremiumPurchase_createdAt_idx" ON "PremiumPurchase" ("createdAt")`,
     `CREATE INDEX IF NOT EXISTS "PremiumPurchase_userId_idx" ON "PremiumPurchase" ("userId")`,
+
+    // SystemFlag — bir martalik vazifalar (masalan hudud birlashtirish backfill) belgisi.
+    `CREATE TABLE IF NOT EXISTS "SystemFlag" (
+       "key"       TEXT NOT NULL,
+       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "SystemFlag_pkey" PRIMARY KEY ("key")
+     )`,
   ];
 
   let ok = 0;
