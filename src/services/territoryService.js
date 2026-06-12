@@ -1,16 +1,37 @@
 const { prisma } = require('../config/database');
 const { Prisma } = require('@prisma/client');
+const polygonClipping = require('polygon-clipping');
 const { polygonAreaM2, estimateOverlapFraction, simplifyPolygon, pointInPolygon, segmentsIntersect } = require('./geoService');
 const constants = require('../config/constants');
 const { tierOf, entitlements } = require('../config/tiers');
 const logger = require('../utils/logger');
 
+// JS fallback (PostGIS yo'q/xato bo'lganda) — polygon-clipping bilan union.
+// newGeoPolygon: GeoJSON Polygon. ownTerritories[].polygon: GeoJSON Polygon.
+// Faqat natija YAGONA poligon bo'lsa qaytaradi (aks holda null — birlashtirmaymiz).
+function unionWithOwnJS(newGeoPolygon, ownTerritories) {
+  try {
+    const polys = [newGeoPolygon.coordinates, ...ownTerritories.map(t => t.polygon && t.polygon.coordinates)];
+    if (polys.some(c => !c || !c[0])) return null;
+    const result = polygonClipping.union(...polys); // MultiPolygon: [ [ring,...holes], ... ]
+    if (!Array.isArray(result) || result.length !== 1) return null; // ajralgan/nuqta-teggan → birlashmaydi
+    const merged = result[0];
+    if (!merged || !merged[0]) return null;
+    const geoPolygon = { type: 'Polygon', coordinates: merged };
+    const ringLatLng = merged[0].map(([lng, lat]) => [lat, lng]); // polygonAreaM2 [lat,lng] kutadi
+    return { geoPolygon, area: polygonAreaM2(ringLatLng) };
+  } catch (err) {
+    logger.warn('Hudud union (JS) — birlashtirilmadi:', (err.message || '').split('\n')[0]);
+    return null;
+  }
+}
+
 // Foydalanuvchining O'ZIGA tegishli, yangi poligon bilan tegib/ustma-ust tushgan
-// hududlarini PostGIS ST_Union orqali bitta umumiy poligonga birlashtiradi.
-// Faqat natija YAGONA Polygon bo'lsa qaytaradi (faqat nuqtada teggan → MultiPolygon →
-// birlashtirmaymiz, chunki renderlar coordinates[0] — bitta halqa kutadi).
-// PostGIS yo'q/xato bo'lsa null — chaqiruvchi eski xulqqa (birlashtirmaslik) qaytadi.
-async function unionWithOwn(newGeoJSONStr, ownTerritories) {
+// hududlarini bitta umumiy poligonga birlashtiradi (ichki chegaralar eriydi → bitta kontur).
+// Avval PostGIS ST_Union (production), bo'lmasa JS fallback (polygon-clipping).
+// Faqat natija YAGONA Polygon bo'lsa qaytaradi (faqat nuqtada teggan → birlashtirmaymiz,
+// chunki renderlar coordinates[0] — bitta halqa kutadi). Hech narsa bo'lmasa null.
+async function unionWithOwn(newGeoJSONStr, newGeoPolygon, ownTerritories) {
   if (!ownTerritories.length) return null;
   try {
     const ids = ownTerritories.map(t => t.id);
@@ -26,14 +47,14 @@ async function unionWithOwn(newGeoJSONStr, ownTerritories) {
       ) j
     `;
     const row = rows && rows[0];
-    if (!row || !row.geojson) return null;
+    if (!row || !row.geojson) return unionWithOwnJS(newGeoPolygon, ownTerritories);
     if (String(row.gtype || '').toUpperCase() !== 'POLYGON') return null;
     const geom = JSON.parse(row.geojson);
     if (!geom || geom.type !== 'Polygon' || !geom.coordinates || !geom.coordinates[0]) return null;
     return { geoPolygon: geom, area: Number(row.area) || 0 };
   } catch (err) {
-    logger.warn('Hudud union (PostGIS) — birlashtirilmadi:', (err.message || '').split('\n')[0]);
-    return null;
+    // PostGIS yo'q/xato — JS fallback'ga o'tamiz (lokal/test va PostGIS'siz muhitlar uchun)
+    return unionWithOwnJS(newGeoPolygon, ownTerritories);
   }
 }
 
@@ -125,7 +146,7 @@ async function captureTerritory(userId, rawPoints) {
   // Yangi poligonga tegib/ustma-ust tushgan o'z hududlarini topamiz va ST_Union
   // bilan bitta umumiy poligonga qo'shamiz. Birlashsa — eski o'z hududlar o'chiriladi.
   const ownMergeCandidates = overlapping.filter(t => t.ownerId === userId);
-  const mergeResult = await unionWithOwn(geoPolygonStr, ownMergeCandidates);
+  const mergeResult = await unionWithOwn(geoPolygonStr, geoPolygon, ownMergeCandidates);
   const ownMergeList = mergeResult ? ownMergeCandidates : [];
   const ownAreaSum = ownMergeList.reduce((s, t) => s + (t.area || 0), 0);
   const finalGeoPolygon = mergeResult ? mergeResult.geoPolygon : geoPolygon;
