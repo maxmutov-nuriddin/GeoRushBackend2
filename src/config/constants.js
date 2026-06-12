@@ -2,9 +2,10 @@ module.exports = {
   // ── Tezlik chegaralari ────────────────────────────────────────────
   // Piyoda:   maks ~2 m/s  (7 km/h)
   // Yugurish: maks ~5 m/s  (18 km/h)
-  // Velosiped maks ~10 m/s (36 km/h) ← hozircha yoqilgan, test uchun
-  //   TODO: velotestlar tugagach quyidagini 6 ga tushirish
-  //         MAX_PLAYER_SPEED_MS: 6  // faqat piyoda + yugurish
+  // Velosiped maks ~10 m/s (36 km/h) ← ATAYIN yoqilgan gameplay qarori (velotest davri).
+  // Qiymatni o'zgartirish kodda EMAS, env orqali: MAX_PLAYER_SPEED_MS=6 (faqat piyoda+yugurish).
+  // Velotest yakunida prod env'da 6 qo'yiladi — kod default'i 10 bo'lib qoladi,
+  // shunda env'siz lokal/test muhitlar velosiped rejimida ishlayveradi.
   MAX_PLAYER_SPEED_MS: parseFloat(process.env.MAX_PLAYER_SPEED_MS || '10'), // 10 m/s ≈ 36 km/h (velosiped)
   TELEPORT_SPEED_MS: 50,            // 50 m/s — imkonsiz harakat (teleport himoyasi)
   MAX_LOCATION_GAP_MS: 30000,       // Restart trail if gap > 30s

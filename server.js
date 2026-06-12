@@ -53,6 +53,19 @@ function sweepExpiredPremium() {
   }).catch((err) => logger.error('Premium sweep failed', err));
 }
 
+// Muddati o'tgan refresh tokenlarni davriy tozalash (data-hygiene).
+// Token faqat ishlatilganda o'chiriladi — tashlab ketilgan qurilmalarning eskirgan
+// yozuvlari shu sweep'siz abadiy qolib jadval cheksiz o'sadi. deleteMany idempotent,
+// shuning uchun scale-out (ko'p instance) rejimida ham xavfsiz.
+const REFRESH_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000; // kuniga bir marta
+function sweepExpiredRefreshTokens() {
+  prisma.refreshToken.deleteMany({
+    where: { expiresAt: { lt: new Date() } }
+  }).then((r) => {
+    if (r.count > 0) logger.info(`Refresh token sweep: ${r.count} ta eskirgan yozuv o'chirildi`);
+  }).catch((err) => logger.error('Refresh token sweep failed', err));
+}
+
 const app = express();
 // Render/nginx kabi reverse-proxy orqasida ishlaganda haqiqiy client IP'ni olish uchun.
 // Bu bo'lmasa rate-limit va ipBlocker hamma so'rovni bitta IP sifatida ko'radi (yoki spoof qilinadi).
@@ -151,6 +164,10 @@ async function start() {
     // Premium expiry sweep — darrov bir marta, keyin har soatda. unref() — process chiqishini bloklamaydi.
     sweepExpiredPremium();
     setInterval(sweepExpiredPremium, PREMIUM_SWEEP_INTERVAL_MS).unref();
+
+    // Eskirgan refresh tokenlar — darrov bir marta, keyin kuniga bir marta.
+    sweepExpiredRefreshTokens();
+    setInterval(sweepExpiredRefreshTokens, REFRESH_SWEEP_INTERVAL_MS).unref();
 
     server.listen(PORT, () => {
       logger.info(`GeoRush server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);

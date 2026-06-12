@@ -16,11 +16,26 @@ function generateToken(userId, username) {
 const REFRESH_TOKEN_BYTES = 48; // 96 char hex
 const REFRESH_TOKEN_TTL_DAYS = 30;
 
+// Bazada faqat SHA-256 hash saqlanadi — DB sizib chiqsa ham tokenlar ishlatib bo'lmaydi.
+// Client har doim xom (raw) tokenni oladi va yuboradi.
+function hashRefreshToken(raw) {
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
+
 async function createRefreshToken(userId) {
   const token = crypto.randomBytes(REFRESH_TOKEN_BYTES).toString('hex');
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
-  await prisma.refreshToken.create({ data: { token, userId, expiresAt } });
+  await prisma.refreshToken.create({ data: { token: hashRefreshToken(token), userId, expiresAt } });
   return token;
+}
+
+// Avval hash bo'yicha, topilmasa eski plaintext yozuvlar bo'yicha qidiradi
+// (hashing'dan OLDIN berilgan tokenlar logout bo'lib qolmasligi uchun).
+// Rotation tufayli plaintext yozuvlar birinchi almashinuvdayoq hash'ga o'tadi.
+async function findRefreshTokenRecord(raw) {
+  const record = await prisma.refreshToken.findUnique({ where: { token: hashRefreshToken(raw) } });
+  if (record) return record;
+  return prisma.refreshToken.findUnique({ where: { token: raw } });
 }
 
 function serializeUser(u) {
@@ -269,7 +284,7 @@ async function exchangeRefreshToken(req, res, next) {
     const { refreshToken: incoming } = req.body;
     if (!incoming) return res.status(400).json({ error: 'refreshToken required' });
 
-    const record = await prisma.refreshToken.findUnique({ where: { token: incoming } });
+    const record = await findRefreshTokenRecord(incoming);
     if (!record || new Date() > record.expiresAt) {
       // Eskirgan yoki topilmagan — ikkala holda ham o'chirib tashlaymiz
       if (record) await prisma.refreshToken.delete({ where: { id: record.id } }).catch(() => {});
@@ -304,7 +319,10 @@ async function logout(req, res, next) {
   try {
     const { refreshToken: incoming } = req.body;
     if (incoming) {
-      await prisma.refreshToken.deleteMany({ where: { token: incoming } });
+      // Hash'langan ham, eski plaintext yozuv ham bekor qilinadi
+      await prisma.refreshToken.deleteMany({
+        where: { token: { in: [hashRefreshToken(incoming), incoming] } },
+      });
     }
     res.json({ ok: true });
   } catch (err) { next(err); }

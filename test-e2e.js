@@ -1,5 +1,23 @@
+require('dotenv').config();
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+
+// XAVFSIZLIK GUARD: bu test bazaga YOZADI va o'chiradi (deleteMany!).
+// Lokal .env PRODUCTION bazaga ulangan bo'lishi mumkin — shuning uchun faqat
+// localhost bazaga ruxsat beriladi. Remote bazada ataylab ishlatish kerak bo'lsa:
+//   E2E_ALLOW_REMOTE_DB=1 node test-e2e.js
+(function guardDatabaseUrl() {
+  const url = process.env.DATABASE_URL || '';
+  let host = '';
+  try { host = new URL(url).hostname; } catch { /* bo'sh yoki yaroqsiz URL — quyida rad etiladi */ }
+  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  if (!isLocal && process.env.E2E_ALLOW_REMOTE_DB !== '1') {
+    console.error('❌ E2E test to\'xtatildi: DATABASE_URL lokal emas (host: ' + (host || 'aniqlanmadi') + ').');
+    console.error('   Bu test bazada test user yaratadi va deleteMany ishlatadi — prod bazaga qarshi xavfli.');
+    console.error('   Lokal Postgres bilan ishga tushiring yoki ongli ravishda E2E_ALLOW_REMOTE_DB=1 qo\'ying.');
+    process.exit(1);
+  }
+})();
 
 const prisma = new PrismaClient();
 const API_URL = 'http://localhost:5001/api';
