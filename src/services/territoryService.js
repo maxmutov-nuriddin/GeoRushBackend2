@@ -1,7 +1,7 @@
 const { prisma } = require('../config/database');
 const { Prisma } = require('@prisma/client');
 const polygonClipping = require('polygon-clipping');
-const { polygonAreaM2, estimateOverlapFraction, simplifyPolygon, pointInPolygon, segmentsIntersect } = require('./geoService');
+const { polygonAreaM2, geojsonPolygonAreaM2, largestPolygonOf, differenceGeomJS, estimateOverlapFraction, simplifyPolygon, pointInPolygon, segmentsIntersect } = require('./geoService');
 const constants = require('../config/constants');
 const { tierOf, entitlements } = require('../config/tiers');
 const logger = require('../utils/logger');
@@ -55,6 +55,83 @@ async function unionWithOwn(newGeoJSONStr, newGeoPolygon, ownTerritories) {
   } catch (err) {
     // PostGIS yo'q/xato — JS fallback'ga o'tamiz (lokal/test va PostGIS'siz muhitlar uchun)
     return unionWithOwnJS(newGeoPolygon, ownTerritories);
+  }
+}
+
+// Geometrik AYIRISH: subject (GeoJSON Polygon) − Σ(clipTerritories[].polygon).
+// Avval PostGIS ST_Difference (production), bo'lmasa polygon-clipping (JS fallback).
+// Natija: { geoPolygon, area } (eng katta bo'lak, teshikli area to'g'ri) yoki null (bo'sh).
+// Xato/PostGIS yo'q → JS; JS ham ishlamasa null (chaqiruvchi xavfsiz qaror qabul qiladi).
+async function differenceWith(subjectGeoJSONStr, subjectGeoPolygon, clipTerritories) {
+  if (!clipTerritories.length) return { geoPolygon: subjectGeoPolygon, area: geojsonPolygonAreaM2(subjectGeoPolygon.coordinates) };
+  // JS yo'li (PostGIS yo'q yoki xato bo'lganda yagona ishonchli yo'l)
+  const clipCoords = clipTerritories
+    .map(t => (typeof t.polygon === 'string' ? JSON.parse(t.polygon) : t.polygon))
+    .map(g => g && g.coordinates)
+    .filter(Boolean);
+  const jsDo = () => differenceGeomJS(subjectGeoPolygon.coordinates, clipCoords);
+  try {
+    const ids = clipTerritories.map(t => t.id);
+    const rows = await prisma.$queryRaw`
+      SELECT ST_AsGeoJSON(d) AS geojson, GeometryType(d) AS gtype, ST_Area(d::geography) AS area
+      FROM (
+        SELECT ST_Difference(
+          ST_MakeValid(ST_GeomFromGeoJSON(${subjectGeoJSONStr})),
+          ST_Union(geom)
+        ) AS d
+        FROM (
+          SELECT ST_MakeValid(ST_GeomFromGeoJSON(polygon::text)) AS geom
+            FROM "Territory" WHERE id IN (${Prisma.join(ids)})
+        ) clips
+      ) j
+    `;
+    const row = rows && rows[0];
+    if (!row || !row.geojson) return jsDo();
+    const geom = JSON.parse(row.geojson);
+    const gt = String(row.gtype || '').toUpperCase();
+    if (gt === 'POLYGON' && geom.coordinates && geom.coordinates[0]) {
+      return { geoPolygon: geom, area: Number(row.area) || geojsonPolygonAreaM2(geom.coordinates) };
+    }
+    if (gt === 'MULTIPOLYGON' && Array.isArray(geom.coordinates)) {
+      const largest = largestPolygonOf(geom.coordinates);
+      if (!largest) return null;
+      return { geoPolygon: { type: 'Polygon', coordinates: largest.coordinates }, area: largest.area };
+    }
+    return null; // bo'sh (GEOMETRYCOLLECTION EMPTY va h.k.)
+  } catch (err) {
+    return jsDo();
+  }
+}
+
+// Ikki IN-MEMORY geometriya farqi: subject − clip (ikkalasi GeoJSON Polygon).
+// B (himoyasiz zona) − A (yangi egallangan) hisoblash uchun. PostGIS → JS fallback.
+// Natija: { geoPolygon, area } (B ning qolgan eng katta bo'lagi) yoki null (butunlay yo'qoldi).
+async function differenceTwoGeoms(subjectGeoPolygon, clipGeoPolygon) {
+  const subjStr = JSON.stringify(subjectGeoPolygon);
+  const clipStr = JSON.stringify(clipGeoPolygon);
+  const jsDo = () => differenceGeomJS(subjectGeoPolygon.coordinates, [clipGeoPolygon.coordinates]);
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT ST_AsGeoJSON(d) AS geojson, GeometryType(d) AS gtype, ST_Area(d::geography) AS area
+      FROM (SELECT ST_Difference(
+        ST_MakeValid(ST_GeomFromGeoJSON(${subjStr})),
+        ST_MakeValid(ST_GeomFromGeoJSON(${clipStr}))
+      ) AS d) j
+    `;
+    const row = rows && rows[0];
+    if (!row || !row.geojson) return jsDo();
+    const geom = JSON.parse(row.geojson);
+    const gt = String(row.gtype || '').toUpperCase();
+    if (gt === 'POLYGON' && geom.coordinates && geom.coordinates[0]) {
+      return { geoPolygon: geom, area: Number(row.area) || geojsonPolygonAreaM2(geom.coordinates) };
+    }
+    if (gt === 'MULTIPOLYGON' && Array.isArray(geom.coordinates)) {
+      const largest = largestPolygonOf(geom.coordinates);
+      return largest ? { geoPolygon: { type: 'Polygon', coordinates: largest.coordinates }, area: largest.area } : null;
+    }
+    return null;
+  } catch (err) {
+    return jsDo();
   }
 }
 
@@ -142,29 +219,7 @@ async function captureTerritory(userId, rawPoints) {
     polygon: typeof t.polygon === 'string' ? JSON.parse(t.polygon) : t.polygon
   }));
 
-  // ── O'z hududlari bilan BIRLASHTIRISH ─────────────────────────────────────
-  // Yangi poligonga tegib/ustma-ust tushgan o'z hududlarini topamiz va ST_Union
-  // bilan bitta umumiy poligonga qo'shamiz. Birlashsa — eski o'z hududlar o'chiriladi.
-  const ownMergeCandidates = overlapping.filter(t => t.ownerId === userId);
-  const mergeResult = await unionWithOwn(geoPolygonStr, geoPolygon, ownMergeCandidates);
-  const ownMergeList = mergeResult ? ownMergeCandidates : [];
-  const ownAreaSum = ownMergeList.reduce((s, t) => s + (t.area || 0), 0);
-  const finalGeoPolygon = mergeResult ? mergeResult.geoPolygon : geoPolygon;
-  const finalArea = mergeResult ? (mergeResult.area || area) : area;
-
-  // Hudud limiti — faqat YANGI (birlashmaydigan) hudud qo'shilganda qo'llanadi.
-  if (!mergeResult && Number.isFinite(myEnt.territoryLimit)) {
-    const ownedCount = await prisma.territory.count({ where: { ownerId: userId } });
-    if (ownedCount >= myEnt.territoryLimit) {
-      const err = new Error(`Hudud limiti to'ldi (${myEnt.territoryLimit}). Yangisini egallash uchun eskisini o'chiring.`);
-      err.status = 403;
-      err.code = 'TERRITORY_LIMIT';
-      err.limit = myEnt.territoryLimit;
-      throw err;
-    }
-  }
-
-  // Premium egalarini topish uchun batch fetch
+  // ── Egasi (boshqa) hududlarini shield bo'yicha ajratish: himoyalangan vs olinadigan ──
   const uniqueOwnerIds = [...new Set(
     overlapping
       .filter(t => t.ownerId !== userId)
@@ -178,48 +233,83 @@ async function captureTerritory(userId, rawPoints) {
     : [];
   const ownerMap = new Map(ownerDocs.map(o => [o.id, o]));
 
-  // ── 1-bosqich: BARCHA hududlarni oldin tekshirish ────────────────────────
-  const protectedList = [];
-  const deletableList = [];
+  const protectedList = [];  // himoyalangan (shield) — A maydonidan kesib chiqariladi
+  const deletableList = [];  // himoyasiz — A qamragan qismi olinadi (qisman/to'liq)
 
   for (const old of overlapping) {
-    const oldOwner = old.ownerId;
-    if (oldOwner === userId) continue;
-
-    const owner = ownerMap.get(oldOwner);
-    // Shield: tier marjasi. null=himoya yo'q (free); 5=pro (5 daraja toleransiya); 0=ultra (qat'iy).
-    // Hujumchi owner.level - margin dan past bo'lsa — himoyalangan.
+    if (old.ownerId === userId) continue;
+    const owner = ownerMap.get(old.ownerId);
+    // Shield: null=himoya yo'q (free); 5=pro; 0=ultra. Hujumchi owner.level - margin dan past → himoyalangan.
     const margin = owner ? entitlements(tierOf(owner)).shieldMargin : null;
-    if (margin != null && user.level < (owner.level - margin)) {
-      protectedList.push({ territory: old, requiredLevel: owner.level - margin });
-    } else {
-      deletableList.push(old);
+    if (margin != null && user.level < (owner.level - margin)) protectedList.push(old);
+    else deletableList.push(old);
+  }
+
+  // ── Himoyalangan zonalarni A poligonidan KESIB CHIQARAMIZ (eski throw o'rniga) ──
+  // A faqat himoyalangan zonalardan TASHQARI maydonni oladi; B niki buzilmaydi.
+  let workingPolygon = geoPolygon;
+  let workingStr = geoPolygonStr;
+  let workingArea = area;
+  if (protectedList.length > 0) {
+    const diff = await differenceWith(geoPolygonStr, geoPolygon, protectedList);
+    if (!diff || diff.area < constants.TERRITORY_MIN_AREA_M2) {
+      // Himoyalangan zonalarni ayirgach yetarli maydon qolmadi — egallab bo'lmaydi
+      const err = new Error('Bu hudud himoyalangan zonalar ichida — egallab bo\'lmaydi');
+      err.status = 403;
+      err.code = 'FULLY_PROTECTED';
+      throw err;
+    }
+    workingPolygon = diff.geoPolygon;
+    workingStr = JSON.stringify(diff.geoPolygon);
+    workingArea = diff.area;
+  }
+
+  // ── O'z hududlari bilan BIRLASHTIRISH (kesilgan poligon ustida) ──
+  // Yangi (kesilgan) poligonga tegib tushgan o'z hududlarini bitta umumiy poligonga qo'shamiz.
+  const ownMergeCandidates = overlapping.filter(t => t.ownerId === userId);
+  const mergeResult = await unionWithOwn(workingStr, workingPolygon, ownMergeCandidates);
+  const ownMergeList = mergeResult ? ownMergeCandidates : [];
+  const ownAreaSum = ownMergeList.reduce((s, t) => s + (t.area || 0), 0);
+  const finalGeoPolygon = mergeResult ? mergeResult.geoPolygon : workingPolygon;
+  const finalArea = mergeResult ? (mergeResult.area || workingArea) : workingArea;
+
+  // Hudud limiti — faqat YANGI (birlashmaydigan) hudud qo'shilganda qo'llanadi.
+  if (!mergeResult && Number.isFinite(myEnt.territoryLimit)) {
+    const ownedCount = await prisma.territory.count({ where: { ownerId: userId } });
+    if (ownedCount >= myEnt.territoryLimit) {
+      const err = new Error(`Hudud limiti to'ldi (${myEnt.territoryLimit}). Yangisini egallash uchun eskisini o'chiring.`);
+      err.status = 403;
+      err.code = 'TERRITORY_LIMIT';
+      err.limit = myEnt.territoryLimit;
+      throw err;
     }
   }
 
-  // ── 2-bosqich: Himoyalangan hudud bo'lsa — HECH NARSA yaratilmasin ───────
-  if (protectedList.length > 0) {
-    const requiredLevel = Math.max(...protectedList.map(p => p.requiredLevel));
-    const err = new Error(`Bu hududni egalash uchun Level ${requiredLevel} bo'lish kerak`);
-    err.status = 403;
-    err.code   = 'PREMIUM_PROTECTED';
-    err.requiredLevel = requiredLevel;
-    throw err;
-  }
-
-  // ── 3-bosqich: Transaction ichida atomik zabt etish ───────────────────────
+  // ── Transaction ichida atomik zabt etish ───────────────────────────────────
   let territory;
   let stolenFrom = [];
   let invasionNotifications = [];
 
   const xpMultiplier = myEnt.xpMult; // Free 1× / Pro 2× / Ultra 3×
+  // XP — HAQIQATDA egallangan (kesilgan) maydon asosida, adolatli.
   const xpGained = (
-    Math.floor((area / 100) * constants.XP_PER_100M2) +
+    Math.floor((finalArea / 100) * constants.XP_PER_100M2) +
     constants.XP_TERRITORY_CAPTURE_BONUS +
     (deletableList.length > 0 ? constants.XP_INVASION_BONUS : 0)
   ) * xpMultiplier;
   const newXp   = user.xp + xpGained;
   const newLevel = calculateLevel(newXp);
+
+  // ── Himoyasiz zonalar uchun QISMAN kesish rejasi (transactiondan OLDIN hisoblanadi) ──
+  // Har B uchun: B − A(finalGeoPolygon). Qolsa → B kichrayadi (update); bo'sh → to'liq delete.
+  // differenceTwoGeoms o'z prisma so'rovini ishlatadi — transaction ichida emas, oldin bajaramiz.
+  const deletablePlan = [];
+  for (const old of deletableList) {
+    let remaining = null;
+    try { remaining = await differenceTwoGeoms(old.polygon, finalGeoPolygon); } catch (_) {}
+    const keep = remaining && remaining.area >= constants.TERRITORY_MIN_AREA_M2 ? remaining : null;
+    deletablePlan.push({ old, keep });
+  }
 
   await prisma.$transaction(async (tx) => {
     stolenFrom = [];
@@ -249,31 +339,39 @@ async function captureTerritory(userId, rawPoints) {
       }
     }
 
-    // Eski hududlarni o'chirish va statistikalarni yangilash
-    for (const old of deletableList) {
+    // Himoyasiz zonalar — QISMAN kesish: B qoladigan bo'lsa kichraytiramiz, aks holda to'liq o'chiramiz.
+    for (const { old, keep } of deletablePlan) {
       const oldOwner = old.ownerId;
-
-      // deleteMany — parallel capture xuddi shu hududni allaqachon o'chirgan bo'lsa
-      // P2025 bilan butun transaction yiqilmasin; o'chirilmagan bo'lsa stats ham o'zgarmaydi.
-      const del = await tx.territory.deleteMany({ where: { id: old.id } });
-      if (del.count === 0) continue;
-
       const fraction = estimateOverlapFraction(polygonPoints, old.polygon);
-      invasionNotifications.push({ ownerId: oldOwner, capturePercent: Math.round(fraction * 100) });
-      stolenFrom.push(oldOwner);
 
-      await tx.user.update({
-        where: { id: old.ownerId },
-        data: {
-          totalArea: { decrement: old.area },
-          territoriesLost: { increment: 1 }
-        }
-      });
-      if (old.teamId) {
-        await tx.team.update({
-          where: { id: old.teamId },
-          data: { totalArea: { decrement: old.area } }
+      if (keep) {
+        // B kichrayadi: faqat A qamragan qism yo'qoladi (B − A). To'liq yo'qolmagani uchun
+        // territoriesLost OSHMAYDI; totalArea faqat yo'qolgan qism (old.area − keep.area) kamayadi.
+        const lost = Math.max(0, old.area - keep.area);
+        const upd = await tx.territory.updateMany({
+          where: { id: old.id },
+          data: { polygon: keep.geoPolygon, area: keep.area },
         });
+        if (upd.count === 0) continue; // parallel'da o'chirilgan bo'lsa — o'tkazib yuboramiz
+        invasionNotifications.push({ ownerId: oldOwner, capturePercent: Math.round(fraction * 100) });
+        stolenFrom.push(oldOwner);
+        if (lost > 0) {
+          await tx.user.update({ where: { id: oldOwner }, data: { totalArea: { decrement: lost } } }).catch(() => {});
+          if (old.teamId) await tx.team.update({ where: { id: old.teamId }, data: { totalArea: { decrement: lost } } }).catch(() => {});
+        }
+      } else {
+        // B butunlay A ichida — to'liq o'chiriladi (avvalgi xulq).
+        const del = await tx.territory.deleteMany({ where: { id: old.id } });
+        if (del.count === 0) continue;
+        invasionNotifications.push({ ownerId: oldOwner, capturePercent: Math.round(fraction * 100) });
+        stolenFrom.push(oldOwner);
+        await tx.user.update({
+          where: { id: oldOwner },
+          data: { totalArea: { decrement: old.area }, territoriesLost: { increment: 1 } }
+        });
+        if (old.teamId) {
+          await tx.team.update({ where: { id: old.teamId }, data: { totalArea: { decrement: old.area } } });
+        }
       }
     }
 

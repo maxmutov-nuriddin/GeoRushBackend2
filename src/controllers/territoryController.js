@@ -2,9 +2,30 @@ const { prisma } = require('../config/database');
 const { getTerritoriesInBounds, getUserTerritories, deleteTerritory, captureTerritory } = require('../services/territoryService');
 const { runPostCaptureEffects } = require('../services/captureEffects');
 const { getUserTrail, resetUserTrail } = require('../socket/handlers/locationHandler');
-const { detectClosedPolygon } = require('../services/geoService');
+const { detectClosedPolygon, haversineDistance } = require('../services/geoService');
 const { tierOf, entitlements } = require('../config/tiers');
+const constants = require('../config/constants');
 const logger = require('../utils/logger');
+
+// Offline navbatdan kelgan trail (body) — anti-cheat sanity. Soxta/buzuq bo'lsa null.
+// trail: [{lat,lng}] yoki [{latitude,longitude}]. Ketma-ket sakrash (>60m) yoki juda ko'p
+// nuqta — rad etiladi (watcher chegaralari bilan bir xil).
+// Natija: server trail bilan bir xil format — [[lat,lng],...].
+function sanitizeBodyTrail(raw) {
+  if (!Array.isArray(raw) || raw.length < 4) return null;
+  if (raw.length > constants.MAX_TRAIL_POINTS) return null;
+  const pts = [];
+  for (const p of raw) {
+    const lat = Array.isArray(p) ? p[0] : (p.lat ?? p.latitude);
+    const lng = Array.isArray(p) ? p[1] : (p.lng ?? p.longitude);
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    const last = pts[pts.length - 1];
+    if (last && haversineDistance(last[0], last[1], lat, lng) > 60) return null; // teleport/glitch
+    pts.push([lat, lng]);
+  }
+  return pts.length >= 4 ? pts : null;
+}
 
 async function getTerritories(req, res, next) {
   try {
@@ -118,7 +139,16 @@ async function captureFromRest(req, res, next) {
 
     // Scale rejimida trail Redis'da — REST so'rovi qaysi instance'ga tushishidan
     // qat'i nazar topiladi; bitta instance rejimida xotiradan (avvalgidek).
-    const trail = await getUserTrail(userId);
+    let trail = await getUserTrail(userId);
+
+    // Offline egallash: internet uzilganda mobil ilova trailni navbatga saqlab, keyin
+    // body'da yuboradi. Server trail yetarsiz bo'lsa va body'da to'g'ri trail bo'lsa —
+    // anti-cheat sanity'dan o'tkazib qabul qilamiz (aks holda offline capture hech ishlamasdi).
+    if (!Array.isArray(trail) || trail.length < 4) {
+      const bodyTrail = sanitizeBodyTrail(req.body && req.body.trail);
+      if (bodyTrail) trail = bodyTrail;
+    }
+
     if (!Array.isArray(trail) || trail.length < 4) {
       return res.status(400).json({
         error: 'Yetarli GPS yo\'l yo\'q. Internet ulanishini tekshirib, biroz yurib qaytaring.',

@@ -38,6 +38,46 @@ function polygonAreaM2(points) {
   return Math.abs(area / 2);
 }
 
+// GeoJSON Polygon coordinates ([[ [lng,lat],... outer ], [ hole ],...]) yuzasi m²da —
+// teshiklar (holes) AYIRILADI. polygonAreaM2 [lat,lng] kutadi, shuning uchun almashtiramiz.
+function geojsonPolygonAreaM2(coords) {
+  if (!Array.isArray(coords) || !coords[0]) return 0;
+  const ringArea = (ring) => polygonAreaM2(ring.map(([lng, lat]) => [lat, lng]));
+  let a = ringArea(coords[0]);
+  for (let i = 1; i < coords.length; i++) a -= ringArea(coords[i]);
+  return Math.max(0, a);
+}
+
+// polygon-clipping MultiPolygon natijasidan ENG KATTA yuzali bitta Polygonni qaytaradi
+// (renderlar coordinates[0] — bitta tashqi halqa kutadi). Bo'sh bo'lsa null.
+// Qaytaradi: { coordinates: [[lng,lat]...rings], area } yoki null.
+function largestPolygonOf(multi) {
+  if (!Array.isArray(multi) || multi.length === 0) return null;
+  let best = null, bestArea = -1;
+  for (const poly of multi) {
+    if (!poly || !poly[0]) continue;
+    const a = geojsonPolygonAreaM2(poly);
+    if (a > bestArea) { bestArea = a; best = poly; }
+  }
+  if (!best) return null;
+  return { coordinates: best, area: bestArea };
+}
+
+// JS geometrik ayirish (PostGIS yo'q bo'lganda): subject − Σ(clips).
+// subjectCoords / clip elementlari — GeoJSON Polygon coordinates ([[ring],...]).
+// Natija: { geoPolygon, area } (eng katta bo'lak) yoki null (bo'sh / hammasi kesildi).
+function differenceGeomJS(subjectCoords, clipCoordsList) {
+  try {
+    const polygonClipping = require('polygon-clipping');
+    const res = polygonClipping.difference(subjectCoords, ...clipCoordsList); // MultiPolygon
+    const largest = largestPolygonOf(res);
+    if (!largest) return null;
+    return { geoPolygon: { type: 'Polygon', coordinates: largest.coordinates }, area: largest.area };
+  } catch (_) {
+    return null;
+  }
+}
+
 // Check if two line segments (p1->p2) and (p3->p4) intersect
 // Returns intersection point {lat, lng} or null
 function segmentsIntersect(p1, p2, p3, p4) {
@@ -189,6 +229,9 @@ module.exports = {
   haversineDistance,
   calculateSpeed,
   polygonAreaM2,
+  geojsonPolygonAreaM2,
+  largestPolygonOf,
+  differenceGeomJS,
   simplifyPolygon,
   segmentsIntersect,
   detectClosedPolygon,
