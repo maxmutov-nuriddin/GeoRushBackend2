@@ -3,6 +3,20 @@ const { prisma } = require('../config/database');
 const TIERS = ['all', 'pro', 'ultra'];
 const PERIODS = ['all', 'monthly', 'yearly'];
 
+// Foydalanuvchi bu promokodni AVVAL muvaffaqiyatli ishlatganmi (to'lov bo'lgan).
+// PremiumPurchase'da userId + promoCode bo'yicha tekshiramiz (har user 1 marta).
+async function userAlreadyUsedPromo(userId, code) {
+  if (!userId || !code) return false;
+  try {
+    const cnt = await prisma.premiumPurchase.count({
+      where: { userId: String(userId), promoCode: code.toUpperCase() },
+    });
+    return cnt > 0;
+  } catch {
+    return false; // PremiumPurchase yo'q/xato — bloklamaymiz (xavfsiz default)
+  }
+}
+
 // Promokod berilgan tarif/davrga tegishlimi. 'all' — har doim mos.
 function promoApplies(promo, tier, period) {
   if (!promo) return false;
@@ -113,6 +127,12 @@ async function checkPromoCode(req, res, next) {
       return res.status(400).json({ error: 'Bu promokod tanlangan tarif/davrga tegishli emas' });
     }
 
+    // Har foydalanuvchi promokodni FAQAT BIR MARTA ishlatadi
+    const reqUserId = req.user && (req.user.id || req.user._id);
+    if (reqUserId && await userAlreadyUsedPromo(reqUserId, uppercaseCode)) {
+      return res.status(400).json({ error: 'Siz bu promokodni allaqachon ishlatgansiz', code: 'ALREADY_USED' });
+    }
+
     res.json({
       valid: true,
       discountPct: promo.discountPct,
@@ -125,4 +145,4 @@ async function checkPromoCode(req, res, next) {
   }
 }
 
-module.exports = { createPromoCode, getPromoCodes, deletePromoCode, togglePromoCode, checkPromoCode, promoApplies };
+module.exports = { createPromoCode, getPromoCodes, deletePromoCode, togglePromoCode, checkPromoCode, promoApplies, userAlreadyUsedPromo };
