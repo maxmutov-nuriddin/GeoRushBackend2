@@ -267,7 +267,10 @@ model PromoCode {
   usesCount     Int      @default(0)
   expiresAt     DateTime
   isActive      Boolean  @default(true)
-  
+  // Qaysi tarif/davrga tegishli. 'all' = hammasi (orqaga moslik).
+  appliesTier   String   @default("all")  // 'all' | 'pro' | 'ultra'
+  appliesPeriod String   @default("all")  // 'all' | 'monthly' | 'yearly'
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }

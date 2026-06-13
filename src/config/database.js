@@ -145,6 +145,10 @@ async function ensureCoreTables() {
        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
        CONSTRAINT "SystemFlag_pkey" PRIMARY KEY ("key")
      )`,
+
+    // PromoCode — tarif/davr cheklovi (mavjud jadvalga ustun qo'shamiz, idempotent).
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "appliesTier" TEXT NOT NULL DEFAULT 'all'`,
+    `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "appliesPeriod" TEXT NOT NULL DEFAULT 'all'`,
   ];
 
   let ok = 0;

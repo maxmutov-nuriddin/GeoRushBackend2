@@ -1,5 +1,18 @@
 const { prisma } = require('../config/database');
 
+const TIERS = ['all', 'pro', 'ultra'];
+const PERIODS = ['all', 'monthly', 'yearly'];
+
+// Promokod berilgan tarif/davrga tegishlimi. 'all' — har doim mos.
+function promoApplies(promo, tier, period) {
+  if (!promo) return false;
+  const at = promo.appliesTier || 'all';
+  const ap = promo.appliesPeriod || 'all';
+  const tierOk = at === 'all' || at === tier;
+  const periodOk = ap === 'all' || ap === period;
+  return tierOk && periodOk;
+}
+
 async function createPromoCode(req, res, next) {
   try {
     const { code, discountPct, maxUses, expiresAt, isActive } = req.body;
@@ -11,6 +24,10 @@ async function createPromoCode(req, res, next) {
     if (isNaN(pct) || pct < 1 || pct > 100) {
       return res.status(400).json({ error: 'discountPct 1 dan 100 gacha bo\'lishi kerak' });
     }
+
+    // Tarif/davr cheklovi — ruxsat etilgan qiymatlar, default 'all'
+    const appliesTier = TIERS.includes(req.body.appliesTier) ? req.body.appliesTier : 'all';
+    const appliesPeriod = PERIODS.includes(req.body.appliesPeriod) ? req.body.appliesPeriod : 'all';
 
     const uppercaseCode = code.toUpperCase().trim();
     const existing = await prisma.promoCode.findUnique({ where: { code: uppercaseCode } });
@@ -25,6 +42,8 @@ async function createPromoCode(req, res, next) {
         maxUses:     maxUses ? Number(maxUses) : null,
         expiresAt:   new Date(expiresAt),
         isActive:    isActive !== undefined ? Boolean(isActive) : true,
+        appliesTier,
+        appliesPeriod,
       },
     });
 
@@ -88,10 +107,22 @@ async function checkPromoCode(req, res, next) {
       return res.status(400).json({ error: 'Promokoddan foydalanish limiti tugagan' });
     }
 
-    res.json({ valid: true, discountPct: promo.discountPct, code: promo.code });
+    // Tarif/davr berilgan bo'lsa — moslikni tekshiramiz (berilmasa — eski xulq)
+    const { tier, period } = req.body;
+    if ((tier || period) && !promoApplies(promo, tier, period)) {
+      return res.status(400).json({ error: 'Bu promokod tanlangan tarif/davrga tegishli emas' });
+    }
+
+    res.json({
+      valid: true,
+      discountPct: promo.discountPct,
+      code: promo.code,
+      appliesTier: promo.appliesTier || 'all',
+      appliesPeriod: promo.appliesPeriod || 'all',
+    });
   } catch (err) {
     next(err);
   }
 }
 
-module.exports = { createPromoCode, getPromoCodes, deletePromoCode, togglePromoCode, checkPromoCode };
+module.exports = { createPromoCode, getPromoCodes, deletePromoCode, togglePromoCode, checkPromoCode, promoApplies };

@@ -7,6 +7,7 @@ const { prisma }   = require('../config/database');
 // hardcode edi, admin panel esa tiers'dagi 2500/7500 berardi — bir xil narxga har xil bonus.
 const { TIERS }    = require('../config/tiers');
 const { recordPremiumPurchase } = require('../services/premiumLedger');
+const { promoApplies } = require('../controllers/promoController');
 
 // DB-backed yordamchi funksiyalar (server restart bo'lsa ham saqlanadi)
 async function setPending(chatId, type, windowMs) {
@@ -143,7 +144,7 @@ async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthl
   let promoDiscount = 0;
   if (promoCode) {
     const promo = await prisma.promoCode.findUnique({ where: { code: promoCode.toUpperCase() } });
-    if (promo && promo.isActive && new Date() <= promo.expiresAt) {
+    if (promo && promo.isActive && new Date() <= promo.expiresAt && promoApplies(promo, tier, period)) {
       if (!promo.maxUses || promo.usesCount < promo.maxUses) {
         promoDiscount = promo.discountPct;
       }
@@ -311,7 +312,7 @@ async function initBot() {
       let promoDiscount = 0;
       if (promoCode) {
         const promo = await prisma.promoCode.findUnique({ where: { code: promoCode.toUpperCase() } });
-        if (promo && promo.isActive && new Date() <= promo.expiresAt) {
+        if (promo && promo.isActive && new Date() <= promo.expiresAt && promoApplies(promo, tier, period)) {
           if (!promo.maxUses || promo.usesCount < promo.maxUses) {
             promoDiscount = promo.discountPct;
           }
@@ -440,7 +441,7 @@ async function initBot() {
       let promoDiscount = 0;
       if (promoCode) {
         const promo = await prisma.promoCode.findUnique({ where: { code: promoCode.toUpperCase() } });
-        if (promo && promo.isActive && new Date() <= promo.expiresAt) {
+        if (promo && promo.isActive && new Date() <= promo.expiresAt && promoApplies(promo, tier, period)) {
           if (!promo.maxUses || promo.usesCount < promo.maxUses) {
             promoDiscount = promo.discountPct;
           }
