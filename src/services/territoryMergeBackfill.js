@@ -177,4 +177,4 @@ async function runMergeBackfillOnce() {
   }
 }
 
-module.exports = { mergeAllOwnTerritories, runMergeBackfillOnce };
+module.exports = { mergeAllOwnTerritories, runMergeBackfillOnce, bufferToMulti, closeMerge, TOLERANCE_M, HALF_KM };

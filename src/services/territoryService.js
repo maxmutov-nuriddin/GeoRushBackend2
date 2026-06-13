@@ -2,24 +2,23 @@ const { prisma } = require('../config/database');
 const { Prisma } = require('@prisma/client');
 const polygonClipping = require('polygon-clipping');
 const { polygonAreaM2, geojsonPolygonAreaM2, largestPolygonOf, differenceGeomJS, estimateOverlapFraction, simplifyPolygon, pointInPolygon, segmentsIntersect } = require('./geoService');
+const { bufferToMulti, closeMerge, TOLERANCE_M, HALF_KM } = require('./territoryMergeBackfill');
 const constants = require('../config/constants');
 const { tierOf, entitlements } = require('../config/tiers');
 const logger = require('../utils/logger');
 
-// JS fallback (PostGIS yo'q/xato bo'lganda) — polygon-clipping bilan union.
-// newGeoPolygon: GeoJSON Polygon. ownTerritories[].polygon: GeoJSON Polygon.
+// JS fallback (PostGIS yo'q/xato bo'lganda) — TOLERANTLIK bilan union (backfill bilan izchil).
+// Morfologik "close" (~TOLERANCE_M) GPS bo'shliqlarini ko'priklaydi. newGeoPolygon: GeoJSON Polygon.
 // Faqat natija YAGONA poligon bo'lsa qaytaradi (aks holda null — birlashtirmaymiz).
 function unionWithOwnJS(newGeoPolygon, ownTerritories) {
   try {
     const polys = [newGeoPolygon.coordinates, ...ownTerritories.map(t => t.polygon && t.polygon.coordinates)];
     if (polys.some(c => !c || !c[0])) return null;
-    const result = polygonClipping.union(...polys); // MultiPolygon: [ [ring,...holes], ... ]
-    if (!Array.isArray(result) || result.length !== 1) return null; // ajralgan/nuqta-teggan → birlashmaydi
-    const merged = result[0];
+    const bufs = polys.map(c => bufferToMulti(c, HALF_KM)); // ~HALF kengaytirilgan (tolerantlik)
+    const merged = closeMerge(polys, bufs); // close → bitta Polygon coords yoki null
     if (!merged || !merged[0]) return null;
     const geoPolygon = { type: 'Polygon', coordinates: merged };
-    const ringLatLng = merged[0].map(([lng, lat]) => [lat, lng]); // polygonAreaM2 [lat,lng] kutadi
-    return { geoPolygon, area: polygonAreaM2(ringLatLng) };
+    return { geoPolygon, area: geojsonPolygonAreaM2(merged) };
   } catch (err) {
     logger.warn('Hudud union (JS) — birlashtirilmadi:', (err.message || '').split('\n')[0]);
     return null;
@@ -48,13 +47,36 @@ async function unionWithOwn(newGeoJSONStr, newGeoPolygon, ownTerritories) {
     `;
     const row = rows && rows[0];
     if (!row || !row.geojson) return unionWithOwnJS(newGeoPolygon, ownTerritories);
-    if (String(row.gtype || '').toUpperCase() !== 'POLYGON') return null;
+    // Strict union MultiPolygon bersa (orada bo'shliq) → JS tolerantlik-close bilan ko'priklaymiz.
+    if (String(row.gtype || '').toUpperCase() !== 'POLYGON') return unionWithOwnJS(newGeoPolygon, ownTerritories);
     const geom = JSON.parse(row.geojson);
-    if (!geom || geom.type !== 'Polygon' || !geom.coordinates || !geom.coordinates[0]) return null;
+    if (!geom || geom.type !== 'Polygon' || !geom.coordinates || !geom.coordinates[0]) return unionWithOwnJS(newGeoPolygon, ownTerritories);
     return { geoPolygon: geom, area: Number(row.area) || 0 };
   } catch (err) {
     // PostGIS yo'q/xato — JS fallback'ga o'tamiz (lokal/test va PostGIS'siz muhitlar uchun)
     return unionWithOwnJS(newGeoPolygon, ownTerritories);
+  }
+}
+
+// O'z hududlaridan yangi poligonga ~TOLERANCE_M masofadagi (lekin strict ro'yxatda
+// bo'lmagan)larni topadi — capture-time merge backfill bilan izchil bo'lishi uchun.
+// PostGIS ST_DWithin (production); xato/yo'q bo'lsa [] (lokalda strict yetarli).
+async function findNearbyOwn(userId, geoJSONStr, excludeIds) {
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT * FROM "Territory"
+      WHERE "ownerId" = ${userId}
+        AND ST_DWithin(
+          ST_GeomFromGeoJSON(polygon::text)::geography,
+          ST_GeomFromGeoJSON(${geoJSONStr})::geography,
+          ${TOLERANCE_M}
+        )
+    `;
+    return rows
+      .filter(t => !excludeIds.has(t.id))
+      .map(t => ({ ...t, polygon: typeof t.polygon === 'string' ? JSON.parse(t.polygon) : t.polygon }));
+  } catch (_) {
+    return [];
   }
 }
 
@@ -266,8 +288,14 @@ async function captureTerritory(userId, rawPoints) {
 
   // ── O'z hududlari bilan BIRLASHTIRISH (kesilgan poligon ustida) ──
   // Yangi (kesilgan) poligonga tegib tushgan o'z hududlarini bitta umumiy poligonga qo'shamiz.
-  const ownMergeCandidates = overlapping.filter(t => t.ownerId === userId);
-  const mergeResult = await unionWithOwn(workingStr, workingPolygon, ownMergeCandidates);
+  const strictOwn = overlapping.filter(t => t.ownerId === userId);
+  // Tolerantlik: ~TOLERANCE_M masofadagi o'z zonalarini ham qo'shamiz (backfill bilan izchil).
+  const strictIds = new Set(strictOwn.map(t => t.id));
+  const nearbyOwn = await findNearbyOwn(userId, workingStr, strictIds);
+  const ownMergeCandidates = [...strictOwn, ...nearbyOwn];
+  const mergeResult = ownMergeCandidates.length
+    ? await unionWithOwn(workingStr, workingPolygon, ownMergeCandidates)
+    : null;
   const ownMergeList = mergeResult ? ownMergeCandidates : [];
   const ownAreaSum = ownMergeList.reduce((s, t) => s + (t.area || 0), 0);
   const finalGeoPolygon = mergeResult ? mergeResult.geoPolygon : workingPolygon;
@@ -289,31 +317,45 @@ async function captureTerritory(userId, rawPoints) {
   let territory;
   let stolenFrom = [];
   let invasionNotifications = [];
-
-  const xpMultiplier = myEnt.xpMult; // Free 1× / Pro 2× / Ultra 3×
-  // XP — HAQIQATDA egallangan (kesilgan) maydon asosida, adolatli.
-  const xpGained = (
-    Math.floor((finalArea / 100) * constants.XP_PER_100M2) +
-    constants.XP_TERRITORY_CAPTURE_BONUS +
-    (deletableList.length > 0 ? constants.XP_INVASION_BONUS : 0)
-  ) * xpMultiplier;
-  const newXp   = user.xp + xpGained;
-  const newLevel = calculateLevel(newXp);
+  let updatedTerritories = []; // qisman kesilib KICHRAYGAN (o'chmagan) B zonalar — mijoz darhol yangilaydi
 
   // ── Himoyasiz zonalar uchun QISMAN kesish rejasi (transactiondan OLDIN hisoblanadi) ──
-  // Har B uchun: B − A(finalGeoPolygon). Qolsa → B kichrayadi (update); bo'sh → to'liq delete.
+  // Har B uchun: B − A(finalGeoPolygon). Uch holat:
+  //   'none'    — A B dan deyarli hech narsa olmadi (faqat chetidan tegib o'tdi) → B ga TEGMAYMIZ
+  //   'partial' — B kichrayadi (qolgan qism ≥ MIN_AREA va yo'qotish sezilarli)
+  //   'full'    — B butunlay (yoki ip-ingichka qoldiq) A ga o'tadi → o'chiriladi
   // differenceTwoGeoms o'z prisma so'rovini ishlatadi — transaction ichida emas, oldin bajaramiz.
+  const STEAL_EPSILON_M2 = 1; // bundan kam yo'qotish = chegaraga tegib o'tish, bosqin emas
   const deletablePlan = [];
   for (const old of deletableList) {
     let remaining = null;
     try { remaining = await differenceTwoGeoms(old.polygon, finalGeoPolygon); } catch (_) {}
-    const keep = remaining && remaining.area >= constants.TERRITORY_MIN_AREA_M2 ? remaining : null;
-    deletablePlan.push({ old, keep });
+    const remArea = remaining ? remaining.area : 0;
+    const lost = Math.max(0, (old.area || 0) - remArea);
+    if (remaining && remArea >= constants.TERRITORY_MIN_AREA_M2) {
+      if (lost < STEAL_EPSILON_M2) deletablePlan.push({ old, mode: 'none' });
+      else deletablePlan.push({ old, mode: 'partial', keep: remaining, lost });
+    } else {
+      deletablePlan.push({ old, mode: 'full', lost: old.area || 0 });
+    }
   }
+  // Haqiqatan kimdandir yer olindi (bosqin) — faqat shunda invasion XP/bildirishnoma.
+  const anyRealSteal = deletablePlan.some(p => p.mode !== 'none');
+
+  const xpMultiplier = myEnt.xpMult; // Free 1× / Pro 2× / Ultra 3×
+  // XP — HAQIQATDA egallangan (kesilgan) maydon asosida; bosqin bonusi faqat real yer olinsa.
+  const xpGained = (
+    Math.floor((finalArea / 100) * constants.XP_PER_100M2) +
+    constants.XP_TERRITORY_CAPTURE_BONUS +
+    (anyRealSteal ? constants.XP_INVASION_BONUS : 0)
+  ) * xpMultiplier;
+  const newXp   = user.xp + xpGained;
+  const newLevel = calculateLevel(newXp);
 
   await prisma.$transaction(async (tx) => {
     stolenFrom = [];
     invasionNotifications = [];
+    updatedTerritories = [];
 
     // Yangi territory yaratish (birlashgan bo'lsa — umumiy poligon va maydon bilan)
     territory = await tx.territory.create({
@@ -339,28 +381,29 @@ async function captureTerritory(userId, rawPoints) {
       }
     }
 
-    // Himoyasiz zonalar — QISMAN kesish: B qoladigan bo'lsa kichraytiramiz, aks holda to'liq o'chiramiz.
-    for (const { old, keep } of deletablePlan) {
+    // Himoyasiz zonalar — kesish rejasiga ko'ra: none/partial/full.
+    for (const plan of deletablePlan) {
+      const { old, mode } = plan;
       const oldOwner = old.ownerId;
+
+      if (mode === 'none') continue; // faqat chetidan tegib o'tildi — B ga tegmaymiz, bosqin emas
+
       const fraction = estimateOverlapFraction(polygonPoints, old.polygon);
 
-      if (keep) {
-        // B kichrayadi: faqat A qamragan qism yo'qoladi (B − A). To'liq yo'qolmagani uchun
-        // territoriesLost OSHMAYDI; totalArea faqat yo'qolgan qism (old.area − keep.area) kamayadi.
-        const lost = Math.max(0, old.area - keep.area);
+      if (mode === 'partial') {
+        // B kichrayadi: faqat A qamragan qism yo'qoladi. territoriesLost OSHMAYDI.
         const upd = await tx.territory.updateMany({
           where: { id: old.id },
-          data: { polygon: keep.geoPolygon, area: keep.area },
+          data: { polygon: plan.keep.geoPolygon, area: plan.keep.area },
         });
-        if (upd.count === 0) continue; // parallel'da o'chirilgan bo'lsa — o'tkazib yuboramiz
+        if (upd.count === 0) continue; // parallel'da o'chirilgan — o'tkazib yuboramiz
         invasionNotifications.push({ ownerId: oldOwner, capturePercent: Math.round(fraction * 100) });
         stolenFrom.push(oldOwner);
-        if (lost > 0) {
-          await tx.user.update({ where: { id: oldOwner }, data: { totalArea: { decrement: lost } } }).catch(() => {});
-          if (old.teamId) await tx.team.update({ where: { id: old.teamId }, data: { totalArea: { decrement: lost } } }).catch(() => {});
-        }
+        updatedTerritories.push({ id: old.id, ownerId: oldOwner, teamId: old.teamId || null, polygon: plan.keep.geoPolygon, area: plan.keep.area, color: old.color });
+        await tx.user.update({ where: { id: oldOwner }, data: { totalArea: { decrement: plan.lost } } }).catch(() => {});
+        if (old.teamId) await tx.team.update({ where: { id: old.teamId }, data: { totalArea: { decrement: plan.lost } } }).catch(() => {});
       } else {
-        // B butunlay A ichida — to'liq o'chiriladi (avvalgi xulq).
+        // 'full' — B butunlay (yoki ip-ingichka qoldiq) A ga o'tadi → o'chiriladi.
         const del = await tx.territory.deleteMany({ where: { id: old.id } });
         if (del.count === 0) continue;
         invasionNotifications.push({ ownerId: oldOwner, capturePercent: Math.round(fraction * 100) });
@@ -382,7 +425,8 @@ async function captureTerritory(userId, rawPoints) {
       where: { id: userId },
       data: {
         totalArea: { increment: finalArea - ownAreaSum },
-        territoriesCaptured: { increment: 1 },
+        // O'z zonasini kengaytirish (merge) "yangi hudud" sanalmasin — faqat haqiqatan yangi.
+        territoriesCaptured: { increment: ownMergeList.length > 0 ? 0 : 1 },
         xp: { increment: xpGained },
         level: newLevel
       }
@@ -461,6 +505,8 @@ async function captureTerritory(userId, rawPoints) {
     premiumBonus: xpMultiplier > 1,
     // Birlashtirilgan (o'chirilgan) o'z hududlar id'lari — mijoz kartadan olib tashlaydi
     mergedFrom: ownMergeList.map(t => t.id),
+    // Qisman kesilib kichraygan (o'chmagan) B zonalar — mijoz darhol yangilashi uchun
+    updatedTerritories,
   };
 }
 

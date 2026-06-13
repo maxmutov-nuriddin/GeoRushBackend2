@@ -198,6 +198,13 @@ async function captureFromRest(req, res, next) {
           io.to('global').emit('territory:removed', { territoryId: removedId });
         }
       }
+
+      // Qisman kesilib KICHRAYGAN B zonalar — barcha mijozlar darhol yangi shaklга yangilasin
+      if (Array.isArray(result.updatedTerritories) && result.updatedTerritories.length) {
+        for (const ut of result.updatedTerritories) {
+          io.to('global').emit('territory:updated', { territory: ut });
+        }
+      }
     }
 
     res.json({
