@@ -449,6 +449,22 @@ async function captureTerritory(userId, rawPoints) {
         data: { area: finalArea, xpGained, stolenFrom, merged: ownMergeList.length }
       }
     });
+
+    // ── Manfiy maydon himoyasi (#A) ──────────────────────────────────────────
+    // Area hisoblash usullari (PostGIS geography ↔ JS) orasidagi drift sabab totalArea
+    // 0 dan past tushishi mumkin → reyting buziladi. Faqat TEGILGAN satrlarni (id bo'yicha,
+    // indeksli) 0 ga clamp qilamiz — to'g'ri qiymatlarga tegmaydi (xulq o'zgarmaydi).
+    const touchedUserIds = new Set([userId, ...deletablePlan.filter(p => p.mode !== 'none').map(p => p.old.ownerId)]);
+    const touchedTeamIds = new Set();
+    if (user.teamId) touchedTeamIds.add(user.teamId);
+    for (const own of ownMergeList) if (own.teamId) touchedTeamIds.add(own.teamId);
+    for (const p of deletablePlan) if (p.mode !== 'none' && p.old.teamId) touchedTeamIds.add(p.old.teamId);
+    for (const uid of touchedUserIds) {
+      await tx.$executeRawUnsafe('UPDATE "User" SET "totalArea" = 0 WHERE id = $1 AND "totalArea" < 0', uid).catch(() => {});
+    }
+    for (const tid of touchedTeamIds) {
+      await tx.$executeRawUnsafe('UPDATE "Team" SET "totalArea" = 0 WHERE id = $1 AND "totalArea" < 0', tid).catch(() => {});
+    }
   });
 
   // Find territories that touch the new one (for neighbor notifications)
@@ -476,6 +492,18 @@ async function captureTerritory(userId, rawPoints) {
       const oldPolyPoints = tJson.coordinates[0].map(([lng, lat]) => [lat, lng]);
       return polygonsIntersectJS(polygonPoints, oldPolyPoints);
     });
+  }
+
+  // #B — bir egaga DUBLIKAT bildirishnoma bo'lmasin: stolenFrom va invasionNotifications'ni
+  // egasi bo'yicha yagonalashtiramiz (bir egada bir nechta zona bo'lsa — bitta xabar, eng katta %).
+  stolenFrom = [...new Set(stolenFrom)];
+  {
+    const byOwner = new Map();
+    for (const n of invasionNotifications) {
+      const prev = byOwner.get(n.ownerId);
+      if (!prev || (n.capturePercent || 0) > (prev.capturePercent || 0)) byOwner.set(n.ownerId, n);
+    }
+    invasionNotifications = [...byOwner.values()];
   }
 
   const stolenSet = new Set(stolenFrom);
