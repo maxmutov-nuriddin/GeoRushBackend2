@@ -288,6 +288,7 @@ model PremiumPurchase {
   baseSom     Int      @default(0)  // chegirmasiz to'liq narx (so'm)
   discountPct Int      @default(0)  // qo'llanilgan chegirma foizi
   promoCode   String?  // ishlatilgan promokod (bo'lsa)
+  chargeId    String?  @unique  // provayder tranzaksiya ID'si (Telegram: telegram_payment_charge_id) — takroriy to'lov guard'i
   createdAt   DateTime @default(now())
 
   @@index([createdAt])

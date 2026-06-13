@@ -206,6 +206,19 @@ async function handleSuccessfulPayment(msg) {
   const periodLabel = period === 'yearly' ? '12 oy (365 kun)' : '30 kun';
 
   try {
+    // Idempotency: Telegram bir xil to'lovni qayta yuborsa (retry), ikki marta premium
+    // berilmasligi va coins ikki marta qo'shilmasligi uchun charge ID bo'yicha tekshiramiz.
+    const chargeId = payment.telegram_payment_charge_id || null;
+    if (chargeId) {
+      const dup = await prisma.premiumPurchase.findFirst({
+        where: { chargeId: String(chargeId) }, select: { id: true }
+      });
+      if (dup) {
+        logger.warn(`Takroriy Stars to'lovi e'tiborsiz qoldirildi: chargeId=${chargeId}, userId=${payload.userId}`);
+        return;
+      }
+    }
+
     if (promoCode) {
       await prisma.promoCode.updateMany({
         where: { code: promoCode.toUpperCase() },
@@ -248,7 +261,7 @@ async function handleSuccessfulPayment(msg) {
       amountStars: paidStars,
       amountSom: calculateSomPrice(tier, period, discountPct),
       baseSom: calculateSomPrice(tier, period, 0),
-      discountPct, promoCode,
+      discountPct, promoCode, chargeId,
     });
 
     const until = premiumUntil.toLocaleDateString('uz-UZ');

@@ -138,6 +138,11 @@ async function ensureCoreTables() {
      )`,
     `CREATE INDEX IF NOT EXISTS "PremiumPurchase_createdAt_idx" ON "PremiumPurchase" ("createdAt")`,
     `CREATE INDEX IF NOT EXISTS "PremiumPurchase_userId_idx" ON "PremiumPurchase" ("userId")`,
+    // chargeId — to'lov provayderining yagona tranzaksiya ID'si (Telegram: telegram_payment_charge_id).
+    // Takroriy webhook/payment kelsa ikki marta premium berilmasligi uchun idempotency kaliti.
+    // NULL ruxsat etiladi (eski yozuvlar, admin sovg'a, RevenueCat) — UNIQUE index NULL'larni distinct hisoblaydi.
+    `ALTER TABLE "PremiumPurchase" ADD COLUMN IF NOT EXISTS "chargeId" TEXT`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "PremiumPurchase_chargeId_key" ON "PremiumPurchase" ("chargeId")`,
 
     // SystemFlag — bir martalik vazifalar (masalan hudud birlashtirish backfill) belgisi.
     `CREATE TABLE IF NOT EXISTS "SystemFlag" (

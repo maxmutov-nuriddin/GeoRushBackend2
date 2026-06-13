@@ -23,7 +23,7 @@ function discountedSom(tier, period, discountPct = 0) {
 // yozuv muvaffaqiyatsiz bo'lsa ham premium faollashtirish jarayoni buzilmasin.
 async function recordPremiumPurchase({
   userId, tier = 'pro', period = 'monthly', method,
-  amountSom = 0, amountStars = 0, baseSom = 0, discountPct = 0, promoCode = null,
+  amountSom = 0, amountStars = 0, baseSom = 0, discountPct = 0, promoCode = null, chargeId = null,
 }) {
   try {
     if (!userId || !method) return null;
@@ -36,6 +36,7 @@ async function recordPremiumPurchase({
         baseSom: Math.round(baseSom) || 0,
         discountPct: Math.round(discountPct) || 0,
         promoCode: promoCode ? String(promoCode).toUpperCase() : null,
+        chargeId: chargeId ? String(chargeId) : null,
       },
     });
   } catch (err) {
