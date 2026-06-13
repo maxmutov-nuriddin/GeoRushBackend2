@@ -349,8 +349,9 @@ async function captureTerritory(userId, rawPoints) {
     constants.XP_TERRITORY_CAPTURE_BONUS +
     (anyRealSteal ? constants.XP_INVASION_BONUS : 0)
   ) * xpMultiplier;
-  const newXp   = user.xp + xpGained;
-  const newLevel = calculateLevel(newXp);
+  // let — parallel capture race'da tranzaksiya ichida ATOMIK qiymatga to'g'rilanadi (pastda).
+  let newXp   = user.xp + xpGained;
+  let newLevel = calculateLevel(newXp);
 
   await prisma.$transaction(async (tx) => {
     stolenFrom = [];
@@ -421,7 +422,7 @@ async function captureTerritory(userId, rawPoints) {
     // Foydalanuvchi va jamoa statistikalarini yangilash.
     // Birlashganda: yangi umumiy maydon QO'SHILADI, birlashtirilgan eski o'z hududlar
     // maydoni AYIRILADI (ustma-ust qism ikki marta sanalmasin). Birlashmasa ownAreaSum=0.
-    await tx.user.update({
+    const updatedUser = await tx.user.update({
       where: { id: userId },
       data: {
         totalArea: { increment: finalArea - ownAreaSum },
@@ -429,8 +430,23 @@ async function captureTerritory(userId, rawPoints) {
         territoriesCaptured: { increment: ownMergeList.length > 0 ? 0 : 1 },
         xp: { increment: xpGained },
         level: newLevel
-      }
+      },
+      select: { xp: true }
     });
+
+    // Parallel capture race himoyasi: `xp` atomik increment bo'ladi, lekin `level` yuqorida
+    // tranzaksiyadan TASHQARI o'qilgan user.xp asosida hisoblangan — ikki parallel capture'da
+    // stale qolishi mumkin edi. UPDATE ... RETURNING (updatedUser.xp) row-lock sabab seriyalanadi,
+    // shuning uchun u HAR DOIM atomik haqiqiy xp'ni beradi. Ketma-ket (normal) capture'da
+    // updatedUser.xp === newXp → bu blok NO-OP, eski xulq aynan saqlanadi.
+    if (updatedUser.xp !== newXp) {
+      newXp = updatedUser.xp;
+      const correctLevel = calculateLevel(newXp);
+      if (correctLevel !== newLevel) {
+        newLevel = correctLevel;
+        await tx.user.update({ where: { id: userId }, data: { level: correctLevel } });
+      }
+    }
 
     if (user.teamId) {
       // Yangi umumiy maydonni jamoaga qo'shamiz; birlashtirilgan o'z hududlar maydoni

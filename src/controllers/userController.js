@@ -104,6 +104,11 @@ async function updateProfile(req, res, next) {
 
 async function changePassword(req, res, next) {
   try {
+    // Route validatori (newPassword min 6) endi haqiqatda qo'llanadi — avval natija
+    // tekshirilmasdi, shuning uchun zaif (masalan 1 belgili) parol o'tib ketardi.
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.id || req.user._id;
     const user = await prisma.user.findUnique({ where: { id: userId } });

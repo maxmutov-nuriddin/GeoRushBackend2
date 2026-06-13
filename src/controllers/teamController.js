@@ -115,21 +115,30 @@ async function joinTeam(req, res, next) {
       select: { isPremium: true, premiumUntil: true, premiumTier: true }
     });
     
-    if (owner) {
-      const maxMembers = entitlements(tierOf(owner)).teamMaxMembers;
-      if (Number.isFinite(maxMembers) && team.memberCount >= maxMembers) {
+    // Atomik a'zolik: maxMembers cheklovi bo'lsa, faqat bo'sh slot qolganda memberCount oshadi.
+    // Avval `team.memberCount >= max` ALOHIDA o'qilardi → ikki parallel join bir xil qiymatni
+    // o'qib jamoa limitdan oshib ketishi mumkin edi. updateMany WHERE memberCount < max atomik —
+    // parallel join'da faqat bo'sh slotlar soni qadar muvaffaqiyat bo'ladi (mantiq o'zgarmaydi:
+    // ketma-ket join'da xulq aynan eski — bitta join, bitta slot).
+    const maxMembers = owner ? entitlements(tierOf(owner)).teamMaxMembers : Infinity;
+    if (Number.isFinite(maxMembers)) {
+      const bumped = await prisma.team.updateMany({
+        where: { id: team.id, memberCount: { lt: maxMembers } },
+        data: { memberCount: { increment: 1 } }
+      });
+      if (bumped.count === 0) {
         return res.status(403).json({ error: `Jamoa to'lgan (maksimal ${maxMembers} a'zo)`, code: 'TEAM_FULL' });
       }
+    } else {
+      await prisma.team.update({
+        where: { id: team.id },
+        data: { memberCount: { increment: 1 } }
+      });
     }
 
     await prisma.user.update({
       where: { id: req.user.id },
       data: { teamId: team.id }
-    });
-    
-    await prisma.team.update({
-      where: { id: team.id },
-      data: { memberCount: { increment: 1 } }
     });
 
     const io = getIo();
@@ -358,23 +367,28 @@ async function respondToJoinRequest(req, res, next) {
         select: { isPremium: true, premiumUntil: true, premiumTier: true }
       });
       
-      if (owner) {
-        const maxMembers = entitlements(tierOf(owner)).teamMaxMembers;
-        if (Number.isFinite(maxMembers) && team.memberCount >= maxMembers) {
+      // Atomik a'zolik (joinTeam bilan bir xil himoya) — parallel accept'da limit oshmaydi.
+      const maxMembers = owner ? entitlements(tierOf(owner)).teamMaxMembers : Infinity;
+      if (Number.isFinite(maxMembers)) {
+        const bumped = await prisma.team.updateMany({
+          where: { id: team.id, memberCount: { lt: maxMembers } },
+          data: { memberCount: { increment: 1 } }
+        });
+        if (bumped.count === 0) {
           return res.status(403).json({ error: `Jamoa to'lgan (maksimal ${maxMembers} a'zo)`, code: 'TEAM_FULL' });
         }
+      } else {
+        await prisma.team.update({
+          where: { id: team.id },
+          data: { memberCount: { increment: 1 } }
+        });
       }
-      
+
       await prisma.user.update({
         where: { id: request.userId },
         data: { teamId: team.id }
       });
-      
-      await prisma.team.update({
-        where: { id: team.id },
-        data: { memberCount: { increment: 1 } }
-      });
-      
+
       await prisma.teamRequest.updateMany({
         where: { userId: request.userId, status: 'pending', id: { not: request.id } },
         data: { status: 'declined' }

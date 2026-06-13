@@ -12,7 +12,7 @@ router.put('/me', authenticate, [
 ], updateProfile);
 router.put('/me/password', authenticate, [
   body('currentPassword').notEmpty(),
-  body('newPassword').isLength({ min: 8 }),
+  body('newPassword').isLength({ min: 6 }),  // tizim standarti 6 (register/reset/clientlar bilan mos)
 ], changePassword);
 router.post('/me/accept-terms', authenticate, acceptTerms);
 router.post('/me/support', authenticate, [
