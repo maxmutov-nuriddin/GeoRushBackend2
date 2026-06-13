@@ -41,14 +41,14 @@ async function getStats(req, res, next) {
       prisma.user.count({ where: { createdAt: { gte: yesterday, lt: today }, isAdmin: false } }),
       prisma.user.count({ where: { createdAt: { gte: week }, isAdmin: false } }),
       prisma.user.count({ where: { createdAt: { gte: month }, isAdmin: false } }),
-      // Premium statistika
-      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now } } }),
-      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro', premiumIsGift: false } }),
-      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra', premiumIsGift: false } }),
-      prisma.user.count({ where: { isPremium: true, updatedAt: { gte: week } } }),
-      prisma.user.count({ where: { isPremium: true, updatedAt: { gte: month } } }),
+      // Premium statistika — admin akkauntlari daromad/statistikaga kirmaydi (isAdmin: false)
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, isAdmin: false } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro', premiumIsGift: false, isAdmin: false } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra', premiumIsGift: false, isAdmin: false } }),
+      prisma.user.count({ where: { isPremium: true, updatedAt: { gte: week }, isAdmin: false } }),
+      prisma.user.count({ where: { isPremium: true, updatedAt: { gte: month }, isAdmin: false } }),
       // Coins iqtisodi
-      prisma.user.aggregate({ _sum: { coins: true } }),
+      prisma.user.aggregate({ _sum: { coins: true }, where: { isAdmin: false } }),
       // HAQIQIY daromad — chegirmadan keyingi to'langan summalar yig'indisi
       prisma.premiumPurchase.aggregate({ _sum: { amountSom: true, amountStars: true } }).catch(() => null),
     ]);
@@ -679,7 +679,7 @@ async function getAnalytics(req, res, next) {
       prisma.user.count({ where: { createdAt: { gte: month }, isAdmin: false } }),
       prisma.territory.count(),
       prisma.territory.count({ where: { capturedAt: { gte: today } } }),
-      prisma.user.aggregate({ _sum: { totalDistance: true } }),
+      prisma.user.aggregate({ _sum: { totalDistance: true }, where: { isAdmin: false } }),
       prisma.user.findMany({
         where: { isAdmin: false },
         select: { id: true, username: true, color: true, level: true, xp: true, totalArea: true, totalDistance: true, territoriesCaptured: true, coins: true, isPremium: true, premiumTier: true },
@@ -737,7 +737,7 @@ async function getEconomy(req, res, next) {
       revAll, revMonth,
     ] = await Promise.all([
       prisma.user.aggregate({ _sum: { xp: true } }),
-      prisma.user.aggregate({ _sum: { coins: true } }),
+      prisma.user.aggregate({ _sum: { coins: true }, where: { isAdmin: false } }),
       prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, level: true, xp: true, isPremium: true, premiumTier: true }, orderBy: { xp: 'desc' }, take: 20 }),
       prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, totalArea: true, isPremium: true, premiumTier: true }, orderBy: { totalArea: 'desc' }, take: 10 }),
       prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, totalDistance: true, isPremium: true, premiumTier: true }, orderBy: { totalDistance: 'desc' }, take: 10 }),
