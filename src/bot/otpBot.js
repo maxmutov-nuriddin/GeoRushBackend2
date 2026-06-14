@@ -472,9 +472,15 @@ async function initBot() {
 
       logger.info(`Bot kontakt: chatId=${chatId}, phone=${contact.phone_number}`);
 
-      if (contact.user_id && contact.user_id !== msg.from.id) {
+      // XAVFSIZLIK: faqat foydalanuvchining O'ZIGA tegishli, Telegram tasdiqlagan raqamni
+      // qabul qilamiz. `request_contact: true` tugmasi har doim msg.from.id ga teng `user_id`
+      // biriktiradi. Attachment orqali yuborilgan boshqa odamning yoki soxta (telegram'siz)
+      // kontaktida `user_id` UMUMAN BO'LMAYDI — ilgari shart `contact.user_id && ...` edi,
+      // shuning uchun user_id yo'q soxta kontakt guard'ni chetlab o'tib, hujumchi qurbon
+      // OTP'sini o'z chatiga oldirib akkauntni egallashi mumkin edi.
+      if (!contact.user_id || contact.user_id !== msg.from.id) {
         return bot.sendMessage(chatId,
-          '❌ Iltimos, faqat o\'z raqamingizni ulashing.',
+          '❌ Iltimos, faqat o\'z raqamingizni "📱 Raqamni ulashish" tugmasi orqali ulashing.',
           { reply_markup: { remove_keyboard: true } }
         );
       }

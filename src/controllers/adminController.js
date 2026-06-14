@@ -9,6 +9,15 @@ const { invalidateUserCache } = require('../middleware/auth');
 const { recordPremiumPurchase, discountedSom, baseSomFor } = require('../services/premiumLedger');
 const { mergeAllOwnTerritories } = require('../services/territoryMergeBackfill');
 
+// Admin pagination uchun `take` qiymatini chegaralash — `?limit=999999` kabi so'rov
+// katta javob/DoS yaratmasin. Default destructuring (20/30/50) saqlanadi; faqat yuqori
+// chegara (200) qo'yiladi va noto'g'ri/manfiy qiymat default'ga tushadi.
+function clampLimit(value, fallback = 20, max = 200) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n) || n < 1) return Math.min(fallback, max);
+  return Math.min(n, max);
+}
+
 // ─── Dashboard stats ───────────────────────────────────────────────────────────
 async function getStats(req, res, next) {
   try {
@@ -160,7 +169,7 @@ async function getUsers(req, res, next) {
         select: { id: true, username: true, phone: true, color: true, xp: true, level: true, totalArea: true, territoriesCaptured: true, isOnline: true, isAdmin: true, isBanned: true, createdAt: true, lastSeen: true, teamId: true, termsAccepted: true },
         orderBy: { createdAt: 'desc' },
         skip,
-        take: Number(limit)
+        take: clampLimit(limit)
       }),
       prisma.user.count({ where }),
     ]);
@@ -406,7 +415,7 @@ async function getTerritories(req, res, next) {
         select: { id: true, ownerId: true, teamId: true, area: true, color: true, capturedAt: true, owner: { select: { username: true, color: true, level: true } }, team: { select: { name: true, tag: true } } },
         orderBy: { capturedAt: 'desc' },
         skip,
-        take: Number(limit)
+        take: clampLimit(limit)
       }),
       prisma.territory.count({ where: ownerFilter }),
     ]);
@@ -445,7 +454,7 @@ async function getTeams(req, res, next) {
         select: { id: true, name: true, tag: true, color: true, memberCount: true, totalArea: true, isPublic: true, createdAt: true, ownerId: true, owner: { select: { username: true } } },
         orderBy: { createdAt: 'desc' },
         skip,
-        take: Number(limit)
+        take: clampLimit(limit)
       }),
       prisma.team.count(),
     ]);
@@ -494,7 +503,7 @@ async function getEvents(req, res, next) {
         include: { actor: { select: { username: true, color: true } }, target: { select: { username: true } } },
         orderBy: { createdAt: 'desc' },
         skip,
-        take: Number(limit)
+        take: clampLimit(limit)
       }),
       prisma.gameEvent.count({ where: filter }),
     ]);
@@ -565,7 +574,7 @@ async function getUserActivity(req, res, next) {
     const events = await prisma.gameEvent.findMany({
       where: { actorId: req.params.id },
       orderBy: { createdAt: 'desc' },
-      take: Number(limit)
+      take: clampLimit(limit, 30)
     });
     const mappedEvents = events.map(e => ({ ...e, _id: e.id }));
     res.json({ events: mappedEvents });
@@ -601,7 +610,7 @@ async function getAntiCheatLogs(req, res, next) {
         include: { user: { select: { username: true, color: true, level: true } } },
         orderBy: { createdAt: 'desc' },
         skip,
-        take: Number(limit)
+        take: clampLimit(limit)
       }),
       prisma.antiCheatLog.count({ where: filter }),
       prisma.antiCheatLog.groupBy({

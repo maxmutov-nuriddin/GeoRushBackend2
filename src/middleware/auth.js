@@ -23,6 +23,7 @@ const USER_SELECT = {
   isOnline: true, expoPushToken: true, termsAccepted: true, isAdmin: true, isBanned: true,
   coins: true, ownedSkins: true, activeSkinColor: true, activeSkinMarker: true, activeSkinTrail: true,
   isPremium: true, premiumUntil: true, premiumTier: true,
+  tokenVersion: true,
 };
 
 async function authenticate(req, res, next) {
@@ -42,6 +43,15 @@ async function authenticate(req, res, next) {
 
     if (!user) return res.status(401).json({ error: 'User not found' });
     if (user.isBanned) return res.status(403).json({ error: 'Akkaunt bloklangan', code: 'BANNED' });
+
+    // Token bekor qilish tekshiruvi — FAQAT token'da `tv` bor VA user.tokenVersion bilan
+    // mos kelmasa rad etiladi. Eski (tv'siz) tokenlar va migration'gacha bo'lgan holatlar
+    // tekshiruvdan o'tib ketadi — shuning uchun hech kim kutilmaganda logout bo'lmaydi.
+    if (typeof decoded.tv === 'number' && typeof user.tokenVersion === 'number'
+        && decoded.tv !== user.tokenVersion) {
+      return res.status(401).json({ error: 'Sessiya bekor qilingan, qaytadan kiring', code: 'TOKEN_REVOKED' });
+    }
+
     req.user = user;
     next();
   } catch (err) {

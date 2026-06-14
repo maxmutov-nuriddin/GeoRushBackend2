@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { body } = require('express-validator');
 const { getProfile, updateProfile, changePassword, getOnlinePlayers, clearMyData, deleteAccount, savePushToken, acceptTerms, setLocationMeta, getActivity, sendSupport, sendPublicSupport } = require('../controllers/userController');
 const { authenticate } = require('../middleware/auth');
+const { contactLimiter } = require('../middleware/rateLimiter');
 
 router.get('/online', authenticate, getOnlinePlayers);
 router.get('/me/activity', authenticate, getActivity);
@@ -26,8 +27,10 @@ router.delete('/me', authenticate, [
   body('password').notEmpty(),
 ], deleteAccount);
 
-// Auth shart emas
-router.post('/support', [
+// Auth shart emas — shuning uchun IP bo'yicha spamga qarshi cheklov (contact formasi bilan bir xil).
+// Aks holda istalgan odam globalLimiter (500/15daq) chegarasigacha support Telegram kanaliga
+// xabar yog'dira olardi.
+router.post('/support', contactLimiter, [
   body('message').trim().notEmpty().isLength({ max: 2000 }),
   body('phone').optional().trim(),
   body('telegramUsername').optional().trim().isLength({ max: 50 }),

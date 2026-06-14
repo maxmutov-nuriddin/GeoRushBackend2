@@ -4,6 +4,7 @@ const { validationResult } = require('express-validator');
 const { prisma } = require('../config/database');
 const { getIo } = require('../socket/ioInstance');
 const { tierOf, entitlements } = require('../config/tiers');
+const { escapeHtml } = require('../utils/telegram');
 
 async function getProfile(req, res, next) {
   try {
@@ -365,21 +366,22 @@ async function sendSupport(req, res, next) {
     const { username } = req.user;
     const tg = telegramUsername ? `@${telegramUsername.replace(/^@/, '')}` : '—';
     const now = new Date().toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' });
+    // Foydalanuvchi qiymatlari HTML-escape — Markdown inyeksiya/buzilishi yo'q.
     const text = [
-      `🎮 *GeoRush — Foydalanuvchi murojaati*`,
+      `🎮 <b>GeoRush — Foydalanuvchi murojaati</b>`,
       ``,
-      `👤 *Ism:* ${username}`,
-      `📱 *Telegram:* ${tg}`,
-      `🕐 *Vaqt:* ${now}`,
+      `👤 <b>Ism:</b> ${escapeHtml(username)}`,
+      `📱 <b>Telegram:</b> ${escapeHtml(tg)}`,
+      `🕐 <b>Vaqt:</b> ${now}`,
       ``,
-      `💬 *Xabar:*`,
-      message.trim(),
+      `💬 <b>Xabar:</b>`,
+      escapeHtml(message.trim()),
     ].join('\n');
 
     const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
     });
     if (!response.ok) return res.status(500).json({ error: 'Failed to send' });
 
@@ -401,21 +403,22 @@ async function sendPublicSupport(req, res, next) {
     const tg  = telegramUsername ? `@${telegramUsername.replace(/^@/, '')}` : '—';
     const ph  = phone || '—';
     const now = new Date().toLocaleString('uz-UZ', { timeZone: 'Asia/Tashkent' });
+    // Foydalanuvchi qiymatlari HTML-escape — Markdown inyeksiya/buzilishi yo'q.
     const text = [
-      `🎮 *GeoRush — Yordam so\'rovi*`,
+      `🎮 <b>GeoRush — Yordam so'rovi</b>`,
       ``,
-      `📱 *Telefon:* ${ph}`,
-      `✈️ *Telegram:* ${tg}`,
-      `🕐 *Vaqt:* ${now}`,
+      `📱 <b>Telefon:</b> ${escapeHtml(ph)}`,
+      `✈️ <b>Telegram:</b> ${escapeHtml(tg)}`,
+      `🕐 <b>Vaqt:</b> ${now}`,
       ``,
-      `💬 *Xabar:*`,
-      message.trim(),
+      `💬 <b>Xabar:</b>`,
+      escapeHtml(message.trim()),
     ].join('\n');
 
     const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
     });
     if (!response.ok) return res.status(500).json({ error: 'Failed to send' });
 

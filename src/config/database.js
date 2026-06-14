@@ -158,6 +158,9 @@ async function ensureCoreTables() {
     // User — sessiya vaqti hisobi (connect→disconnect davomiyligi yig'iladi, idempotent).
     `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "totalPlaytimeSec" INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "sessionCount" INTEGER NOT NULL DEFAULT 0`,
+    // User — access-token versiyasi (parol tiklash/logout-all'da eski tokenlarni bekor qilish).
+    // Mavjud yozuvlar 0 oladi; JWT'dagi `tv` claim shu bilan solishtiriladi.
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "tokenVersion" INTEGER NOT NULL DEFAULT 0`,
   ];
 
   let ok = 0;

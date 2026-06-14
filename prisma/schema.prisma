@@ -39,6 +39,10 @@ model User {
   isBanned            Boolean      @default(false)
   passwordResetToken  String?
   passwordResetExpires DateTime?
+  // Access-token bekor qilish uchun (logout-all / parol tiklash). JWT ichida `tv` claim
+  // bilan solishtiriladi; mos kelmasa token rad etiladi. Migration: ensureCoreTables'da
+  // ALTER ADD COLUMN (totalPlaytimeSec bilan bir xil xavfsiz yo'l).
+  tokenVersion        Int          @default(0)
 
   coins               Int          @default(0)
   ownedSkins          String[]

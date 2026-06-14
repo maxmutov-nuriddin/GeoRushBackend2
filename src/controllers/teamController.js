@@ -86,11 +86,14 @@ async function getTeam(req, res, next) {
 
 async function listTeams(req, res, next) {
   try {
-    const { page = 1, limit = 20 } = req.query;
+    // Chegaralangan pagination — `?limit=999999` kabi so'rov katta javob/DoS yaratmasin.
+    // page >= 1, limit 1..100 (default 20). Noto'g'ri/manfiy/NaN qiymatlar default'ga tushadi.
+    const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const teams = await prisma.team.findMany({
       orderBy: { totalArea: 'desc' },
-      skip: (+page - 1) * +limit,
-      take: +limit,
+      skip: (page - 1) * limit,
+      take: limit,
     });
     res.json({ teams });
   } catch (err) {

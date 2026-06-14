@@ -5,12 +5,41 @@ const { validationResult } = require('express-validator');
 const { prisma } = require('../config/database');
 const { recordFailedAttempt, recordSuccess, getIp } = require('../middleware/ipBlocker');
 const { tierOf, entitlementsPublic } = require('../config/tiers');
+const { invalidateUserCache } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
-function generateToken(userId, username) {
-  return jwt.sign({ userId, username }, process.env.JWT_SECRET, {
+// tokenVersion berilsa JWT'ga `tv` claim qo'shiladi (token-revoke uchun). Berilmasa
+// claim QO'SHILMAYDI — token "legacy" sifatida ishlaydi va revoke-tekshiruvidan o'tadi
+// (biror call-site o'tkazib yuborilsa ham hech qachon noto'g'ri 401 bermaydi).
+function generateToken(userId, username, tokenVersion) {
+  const payload = { userId, username };
+  if (typeof tokenVersion === 'number') payload.tv = tokenVersion;
+  return jwt.sign(payload, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   });
+}
+
+// ── Secrets 1 — Bosqich 1: httpOnly cookie (QO'SHIMCHA, hali o'qilmaydi) ──────
+// Web klient kelajakda access tokenни localStorage o'rniga shu httpOnly cookie'dan
+// oladi (XSS token o'g'irlay olmaydi). HOZIR cookie faqat O'RNATILADI; authenticate
+// uni hali O'QIMAYDI, shuning uchun Bearer ishlatuvchi joriy klientlar (mobil + web)
+// uchun HECH NARSA o'zgarmaydi. Frontend backend'dan boshqa domenda → cross-site:
+// productionда SameSite=None + Secure shart (dev http'da lax + secure'siz).
+const ACCESS_COOKIE = 'gr_at';
+function setAccessCookie(res, token) {
+  const prod = process.env.NODE_ENV === 'production';
+  try {
+    res.cookie(ACCESS_COOKIE, token, {
+      httpOnly: true,
+      secure: prod,
+      sameSite: prod ? 'none' : 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+  } catch { /* best-effort — cookie javobni hech qachon buzmaydi */ }
+}
+function clearAccessCookie(res) {
+  try { res.clearCookie(ACCESS_COOKIE, { path: '/' }); } catch { /* best-effort */ }
 }
 
 const REFRESH_TOKEN_BYTES = 48; // 96 char hex
@@ -101,8 +130,9 @@ async function login(req, res, next) {
     if (user.isBanned) return res.status(403).json({ error: 'Akkaunt bloklangan', code: 'BANNED' });
 
     recordSuccess(ip);
-    const token = generateToken(user.id, user.username);
+    const token = generateToken(user.id, user.username, user.tokenVersion);
     const refreshToken = await createRefreshToken(user.id);
+    setAccessCookie(res, token);
     res.json({ token, refreshToken, user: serializeUser(user) });
   } catch (err) { next(err); }
 }
@@ -112,7 +142,8 @@ async function getMe(req, res) {
 }
 
 async function refreshToken(req, res) {
-  const token = generateToken(req.user.id, req.user.username);
+  const token = generateToken(req.user.id, req.user.username, req.user.tokenVersion);
+  setAccessCookie(res, token);
   res.json({ token });
 }
 
@@ -246,8 +277,9 @@ async function registerWithPhone(req, res, next) {
       attachReferralOnRegister(user.id, referralCode);
     }
 
-    const token = generateToken(user.id, user.username);
+    const token = generateToken(user.id, user.username, user.tokenVersion);
     const refreshToken = await createRefreshToken(user.id);
+    setAccessCookie(res, token);
     res.status(201).json({ token, refreshToken, user: serializeUser(user) });
   } catch (err) { next(err); }
 }
@@ -272,11 +304,14 @@ async function resetPasswordWithPhone(req, res, next) {
     if (!user) return res.status(404).json({ error: 'Foydalanuvchi topilmadi' });
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
+    // tokenVersion oshiriladi → parol tiklashdan OLDIN berilgan barcha access tokenlar
+    // (o'g'irlangan bo'lishi mumkin) darhol bekor bo'ladi. Cache ham tozalanadi.
     await prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash }
+      data: { passwordHash, tokenVersion: { increment: 1 } }
     });
-    
+    invalidateUserCache(user.id);
+
     await prisma.oTPSession.delete({ where: { id: session.id } });
 
     res.json({ message: 'Parol muvaffaqiyatli yangilandi' });
@@ -300,7 +335,7 @@ async function exchangeRefreshToken(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { id: record.userId },
-      select: { id: true, username: true, isBanned: true }
+      select: { id: true, username: true, isBanned: true, tokenVersion: true }
     });
     if (!user) {
       await prisma.refreshToken.delete({ where: { id: record.id } }).catch(() => {});
@@ -314,8 +349,9 @@ async function exchangeRefreshToken(req, res, next) {
     // Rotation: eski token o'chiriladi, yangi beriladi
     await prisma.refreshToken.delete({ where: { id: record.id } });
     const newRefreshToken = await createRefreshToken(user.id);
-    const newAccessToken = generateToken(user.id, user.username);
+    const newAccessToken = generateToken(user.id, user.username, user.tokenVersion);
 
+    setAccessCookie(res, newAccessToken);
     res.json({ token: newAccessToken, refreshToken: newRefreshToken });
   } catch (err) { next(err); }
 }
@@ -331,6 +367,7 @@ async function logout(req, res, next) {
         where: { token: { in: [hashRefreshToken(incoming), incoming] } },
       });
     }
+    clearAccessCookie(res);
     res.json({ ok: true });
   } catch (err) { next(err); }
 }

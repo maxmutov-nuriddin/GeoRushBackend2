@@ -33,10 +33,19 @@ async function getTerritories(req, res, next) {
     if (!swLat || !swLng || !neLat || !neLng) {
       return res.status(400).json({ error: 'Bounding box required: swLat, swLng, neLat, neLng' });
     }
-    const territories = await getTerritoriesInBounds(
-      parseFloat(swLat), parseFloat(swLng),
-      parseFloat(neLat), parseFloat(neLng),
-    );
+    // Qat'iy tip/diapazon tekshiruvi — NaN yoki noto'g'ri koordinata raw geo-so'rovga
+    // o'tib ketmasin (avval parseFloat natijasi tekshirilmasdi).
+    const sLat = parseFloat(swLat), sLng = parseFloat(swLng);
+    const nLat = parseFloat(neLat), nLng = parseFloat(neLng);
+    const validLat = (v) => Number.isFinite(v) && v >= -90 && v <= 90;
+    const validLng = (v) => Number.isFinite(v) && v >= -180 && v <= 180;
+    if (!validLat(sLat) || !validLat(nLat) || !validLng(sLng) || !validLng(nLng)) {
+      return res.status(400).json({ error: 'Bounding box koordinatalari noto\'g\'ri (lat: -90..90, lng: -180..180)' });
+    }
+    if (sLat > nLat || sLng > nLng) {
+      return res.status(400).json({ error: 'Bounding box noto\'g\'ri: SW burchak NE burchakdan kichik bo\'lishi kerak' });
+    }
+    const territories = await getTerritoriesInBounds(sLat, sLng, nLat, nLng);
     res.json({ territories });
   } catch (err) {
     next(err);

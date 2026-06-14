@@ -125,8 +125,11 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors(corsOptions));
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (msg) => logger.info(msg.trim()) } }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Body-size limit: 2MB. API faqat JSON qabul qiladi (fayl yuklash yo'q); eng katta
+// payload — oflayn trail (MAX_TRAIL_POINTS=500 nuqta, ~20KB) — 2MB'dan ancha kichik.
+// Avval 10mb edi — kerakmas darajada katta DoS yuzasi ochiq turardi.
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 app.use('/api', globalLimiter);
 
@@ -161,8 +164,28 @@ initializeSocket(io);
 
 const PORT = process.env.PORT || 3001;
 
+// Auth-sekretni start paytida tekshiramiz (fail-fast). Aks holda JWT_SECRET yo'q/zaif
+// bo'lsa server jim ishga tushib, faqat birinchi login/verify'da yiqilardi — yoki
+// (eng yomoni) zaif sekret bilan ishlab, tokenlarni qalbakilashtirishga yo'l ochardi.
+function validateAuthSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET o\'rnatilmagan — server xavfsiz ishga tusha olmaydi.');
+  }
+  const MIN_LEN = 32;
+  if (secret.length < MIN_LEN) {
+    const msg = `JWT_SECRET juda qisqa (${secret.length} belgi) — kamida ${MIN_LEN} (tavsiya 64) belgi bo'lishi shart.`;
+    if (process.env.NODE_ENV === 'production') throw new Error(msg);
+    logger.warn(`[XAVFSIZLIK OGOHLANTIRISHI] ${msg}`);
+  }
+  if (process.env.NODE_ENV === 'production' && /your-super-secret|change-?me|example|secret-key/i.test(secret)) {
+    throw new Error('JWT_SECRET namunaviy (placeholder) qiymatda — productionda haqiqiy tasodifiy sekret kerak.');
+  }
+}
+
 async function start() {
   try {
+    validateAuthSecret();
     await initializeDatabase();
     await initBot();
 
