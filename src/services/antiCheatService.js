@@ -71,8 +71,12 @@ function validateLocationUpdate(userId, newLat, newLng, clientTimestamp) {
     return { valid: true, relocate: true, speed: speedMs };
   }
 
-  // Normal harakat — outlier hisoblagichni nollaymiz
-  const trailGap = timeDelta > constants.MAX_LOCATION_GAP_MS;
+  // Normal harakat — outlier hisoblagichni nollaymiz.
+  // Trail "uzilishi" = uzoq tanaffus (>30s) VA o'sha tanaffusда UZOQQA siljish (>40m).
+  // Bir joyda turib pause qilgan bo'lsa (masofa kichik) → trailGap=false → yo'l SAQLANADI.
+  // Uzoqqa siljish bo'lsa (teleport/transport, GPS sakrash) → trailGap=true → yo'l uziladi.
+  const trailGap = timeDelta > constants.MAX_LOCATION_GAP_MS
+    && distanceM > constants.TRAIL_GAP_MIN_DISTANCE_M;
 
   playerPositions.set(userId, { lat: newLat, lng: newLng, timestamp: now });
   consecutiveRejects.set(userId, 0);

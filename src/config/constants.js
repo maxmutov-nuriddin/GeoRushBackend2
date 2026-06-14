@@ -8,7 +8,11 @@ module.exports = {
   // shunda env'siz lokal/test muhitlar velosiped rejimida ishlayveradi.
   MAX_PLAYER_SPEED_MS: parseFloat(process.env.MAX_PLAYER_SPEED_MS || '10'), // 10 m/s ≈ 36 km/h (velosiped)
   TELEPORT_SPEED_MS: 50,            // 50 m/s — imkonsiz harakat (teleport himoyasi)
-  MAX_LOCATION_GAP_MS: 30000,       // Restart trail if gap > 30s
+  MAX_LOCATION_GAP_MS: 30000,       // Uzoq tanaffus chegarasi (30s)
+  // Trail faqat tanaffus uzoq BO'LIB, o'sha tanaffusda shuncha metrdan KO'P siljiganда uziladi.
+  // Bir joyda turib pause qilganда (GPS drift <40m) trail SAQLANADI; uzoqqa ketsa (teleport/
+  // transport) uziladi (anti-cheat). Env: TRAIL_GAP_MIN_DISTANCE_M.
+  TRAIL_GAP_MIN_DISTANCE_M: parseFloat(process.env.TRAIL_GAP_MIN_DISTANCE_M || '40'),
   MIN_LOCATION_INTERVAL_MS: 500,    // Ignore updates faster than 500ms
   ANTICHEAT_NEW_ROW_GAP_MS: 120000, // Anti-cheat: shuncha tanaffusdan keyin yangi "incident" qatori (2 daqiqa)
   ANTICHEAT_FLUSH_MS: 15000,        // Anti-cheat: bitta incident count'ini DB'ga yangilash oralig'i (15s)
