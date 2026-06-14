@@ -26,6 +26,7 @@ async function getStats(req, res, next) {
       premiumTotal, premiumPro, premiumUltra,
       premiumWeek, premiumMonth,
       coinsResult, revPurchase,
+      revPurchaseMonth, paidPurchasesCount, freeGrantsCount, baseAgg, gameAgg,
     ] = await Promise.all([
       prisma.user.count({ where: { isAdmin: false } }),
       prisma.user.count({ where: { isBanned: true } }),
@@ -53,6 +54,16 @@ async function getStats(req, res, next) {
       prisma.user.aggregate({ _sum: { coins: true }, where: { isAdmin: false } }),
       // HAQIQIY daromad — chegirmadan keyingi to'langan summalar yig'indisi
       prisma.premiumPurchase.aggregate({ _sum: { amountSom: true, amountStars: true } }).catch(() => null),
+      // Bu oygi haqiqiy daromad (chegirmadan keyin to'langan)
+      prisma.premiumPurchase.aggregate({ where: { createdAt: { gte: month } }, _sum: { amountSom: true, amountStars: true } }).catch(() => null),
+      // To'lovli xaridlar soni (ledger yozuvlari — har biri haqiqiy to'lov)
+      prisma.premiumPurchase.count().catch(() => 0),
+      // Faol tekin/bonus (sovg'a) premiumlar — daromad EMAS
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumIsGift: true, isAdmin: false } }),
+      // To'liq (chegirmasiz) narx yig'indisi — berilgan chegirmani hisoblash uchun (base − paid)
+      prisma.premiumPurchase.aggregate({ _sum: { baseSom: true } }).catch(() => null),
+      // O'yin iqtisodi: jami egallangan hudud + jami masofa (admin'siz)
+      prisma.user.aggregate({ where: { isAdmin: false }, _sum: { totalArea: true, totalDistance: true } }),
     ]);
 
     // Taxminiy daromad (so'm)
@@ -75,6 +86,17 @@ async function getStats(req, res, next) {
       realRevenueSom:   revPurchase?._sum?.amountSom   || 0,
       realRevenueStars: revPurchase?._sum?.amountStars || 0,
       totalCoinsInCirculation: coinsResult._sum.coins || 0,
+      // ── Bu oygi haqiqiy daromad (chegirmadan keyin haqiqatda to'langan) ──
+      realRevenueSomMonth:   revPurchaseMonth?._sum?.amountSom   || 0,
+      realRevenueStarsMonth: revPurchaseMonth?._sum?.amountStars || 0,
+      // To'lovli xaridlar soni va FAOL tekin/bonus berilgan premiumlar (tekin — daromadga kirmaydi)
+      paidPurchasesCount,
+      freeGrantsCount,
+      // Jami berilgan chegirma (so'm) = to'liq narx − haqiqatda to'langan
+      totalDiscountSom: Math.max(0, (baseAgg?._sum?.baseSom || 0) - (revPurchase?._sum?.amountSom || 0)),
+      // O'yin iqtisodi
+      totalAreaCaptured: gameAgg?._sum?.totalArea || 0,
+      totalDistanceM:    gameAgg?._sum?.totalDistance || 0,
     });
   } catch (err) { next(err); }
 }
