@@ -154,6 +154,10 @@ async function ensureCoreTables() {
     // PromoCode — tarif/davr cheklovi (mavjud jadvalga ustun qo'shamiz, idempotent).
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "appliesTier" TEXT NOT NULL DEFAULT 'all'`,
     `ALTER TABLE "PromoCode" ADD COLUMN IF NOT EXISTS "appliesPeriod" TEXT NOT NULL DEFAULT 'all'`,
+
+    // User — sessiya vaqti hisobi (connect→disconnect davomiyligi yig'iladi, idempotent).
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "totalPlaytimeSec" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "sessionCount" INTEGER NOT NULL DEFAULT 0`,
   ];
 
   let ok = 0;

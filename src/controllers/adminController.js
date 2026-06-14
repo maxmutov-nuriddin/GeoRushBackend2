@@ -27,6 +27,8 @@ async function getStats(req, res, next) {
       premiumWeek, premiumMonth,
       coinsResult, revPurchase,
       revPurchaseMonth, paidPurchasesCount, freeGrantsCount, baseAgg, gameAgg,
+      revToday, revWeek, revPro, revUltra, userAvg, usersInTeam, publicTeams, antiCheatTypes,
+      playSum, activeUsers, churnedUsers,
     ] = await Promise.all([
       prisma.user.count({ where: { isAdmin: false } }),
       prisma.user.count({ where: { isBanned: true } }),
@@ -64,6 +66,24 @@ async function getStats(req, res, next) {
       prisma.premiumPurchase.aggregate({ _sum: { baseSom: true } }).catch(() => null),
       // O'yin iqtisodi: jami egallangan hudud + jami masofa (admin'siz)
       prisma.user.aggregate({ where: { isAdmin: false }, _sum: { totalArea: true, totalDistance: true } }),
+      // Daromad dinamikasi (haqiqiy to'langan so'm): bugun va bu hafta
+      prisma.premiumPurchase.aggregate({ where: { createdAt: { gte: today } }, _sum: { amountSom: true } }).catch(() => null),
+      prisma.premiumPurchase.aggregate({ where: { createdAt: { gte: week } }, _sum: { amountSom: true } }).catch(() => null),
+      // Daromad tarif bo'yicha (haqiqiy to'langan so'm)
+      prisma.premiumPurchase.aggregate({ where: { tier: 'pro' }, _sum: { amountSom: true } }).catch(() => null),
+      prisma.premiumPurchase.aggregate({ where: { tier: 'ultra' }, _sum: { amountSom: true } }).catch(() => null),
+      // Foydalanuvchi o'rtachalari (admin'siz)
+      prisma.user.aggregate({ where: { isAdmin: false }, _avg: { level: true, xp: true } }),
+      // Jamoadagi o'yinchilar + ochiq jamoalar
+      prisma.user.count({ where: { isAdmin: false, teamId: { not: null } } }),
+      prisma.team.count({ where: { isPublic: true } }),
+      // Anti-cheat turlari bo'yicha taqsimot (admin'siz)
+      prisma.antiCheatLog.groupBy({ by: ['type'], _count: { type: true }, where: { user: { isAdmin: false } } }).catch(() => []),
+      // Sessiya vaqti (o'rtacha = jami / sessiyalar soni) — admin'siz
+      prisma.user.aggregate({ where: { isAdmin: false }, _sum: { totalPlaytimeSec: true, sessionCount: true } }).catch(() => null),
+      // Saqlanish: faol (30 kun ichida ko'rilgan) va chiqib ketgan (30 kundan oldin oxirgi marta)
+      prisma.user.count({ where: { isAdmin: false, lastSeen: { gte: month } } }),
+      prisma.user.count({ where: { isAdmin: false, lastSeen: { lt: month } } }),
     ]);
 
     // Taxminiy daromad (so'm)
@@ -97,6 +117,25 @@ async function getStats(req, res, next) {
       // O'yin iqtisodi
       totalAreaCaptured: gameAgg?._sum?.totalArea || 0,
       totalDistanceM:    gameAgg?._sum?.totalDistance || 0,
+      // ── Daromad dinamikasi (haqiqiy to'langan so'm) ──
+      realRevenueSomToday: revToday?._sum?.amountSom || 0,
+      realRevenueSomWeek:  revWeek?._sum?.amountSom  || 0,
+      revProSom:   revPro?._sum?.amountSom   || 0,
+      revUltraSom: revUltra?._sum?.amountSom || 0,
+      // ── Foydalanuvchi tahlili ──
+      avgLevel: Math.round((userAvg?._avg?.level || 0) * 10) / 10,
+      avgXp:    Math.round(userAvg?._avg?.xp || 0),
+      usersInTeam,
+      publicTeams,
+      // Anti-cheat turlari bo'yicha taqsimot
+      antiCheatByType: (antiCheatTypes || []).map(t => ({ type: t.type, count: t._count.type })).sort((a, b) => b.count - a.count),
+      // ── Sessiya va saqlanish (retention) ──
+      avgSessionSec: (playSum?._sum?.sessionCount || 0) > 0
+        ? Math.round((playSum._sum.totalPlaytimeSec || 0) / playSum._sum.sessionCount) : 0,
+      totalSessions:    playSum?._sum?.sessionCount    || 0,
+      totalPlaytimeSec: playSum?._sum?.totalPlaytimeSec || 0,
+      activeUsers,    // 30 kun ichida faol bo'lganlar
+      churnedUsers,   // 30 kundan beri kirmaganlar (chiqib ketgan)
     });
   } catch (err) { next(err); }
 }

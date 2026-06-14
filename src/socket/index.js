@@ -134,6 +134,7 @@ function initializeSocket(io) {
           where: { id: userId },
           data: { isOnline: true, socketId: socket.id, lastSeen: new Date() },
         });
+        socket.data.connectedAt = Date.now(); // sessiya boshlanishi — disconnect'da davomiylik hisoblanadi
 
         if (teamId) socket.join(`team:${teamId}`);
       }
@@ -177,10 +178,19 @@ function initializeSocket(io) {
       onlineStore.removeLocal(userId);
       removePlayer(userId);
 
+      // Sessiya davomiyligi (connect→disconnect). Faqat OQILONA oraliq hisobga olinadi
+      // (5 soniya .. 12 soat) — soxta/osilib qolgan sessiyalar o'rtachani buzmasin.
+      // Bu blok faqat HAQIQIY disconnect'da ishlaydi (reconnect-race yuqorida return qilingan).
+      const sessionSec = socket.data.connectedAt
+        ? Math.round((Date.now() - socket.data.connectedAt) / 1000) : 0;
+      const validSession = sessionSec >= 5 && sessionSec <= 12 * 3600;
       try {
         await prisma.user.update({
           where: { id: userId },
-          data: { isOnline: false, socketId: null, lastSeen: new Date() },
+          data: {
+            isOnline: false, socketId: null, lastSeen: new Date(),
+            ...(validSession ? { totalPlaytimeSec: { increment: sessionSec }, sessionCount: { increment: 1 } } : {}),
+          },
         });
       } catch (err) {
         logger.error('Error on socket disconnect', err);

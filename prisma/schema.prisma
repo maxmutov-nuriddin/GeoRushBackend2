@@ -27,6 +27,8 @@ model User {
   territoriesLost     Int          @default(0)
   lastLocation        Json?        // GeoJSON point or simple object
   lastSeen            DateTime?
+  totalPlaytimeSec    Int          @default(0)   // ilovada o'tkazilgan jami vaqt (soniya) — sessiyalar yig'indisi
+  sessionCount        Int          @default(0)   // tugagan sessiyalar soni (o'rtacha = totalPlaytimeSec / sessionCount)
   city                String?
   country             String?
   isOnline            Boolean      @default(false)
