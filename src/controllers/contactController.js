@@ -8,8 +8,8 @@ async function sendContact(req, res, next) {
     const { name, phone, telegram, message } = req.body;
     if (!message || !message.trim()) return res.status(400).json({ error: 'message required' });
 
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId   = process.env.TELEGRAM_CHAT_ID;
+    const botToken = process.env.SUPPORT_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+    const chatId   = process.env.SUPPORT_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
     if (!botToken || !chatId) return res.status(503).json({ error: 'Support not configured' });
 
     const tg  = telegram && telegram.trim() ? `@${telegram.trim().replace(/^@/, '')}` : '—';
