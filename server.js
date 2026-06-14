@@ -26,6 +26,7 @@ const { initializeSocket } = require('./src/socket');
 const { setIo } = require('./src/socket/ioInstance');
 const { flushAllPendingDistances } = require('./src/socket/handlers/locationHandler');
 const { initBot } = require('./src/bot/otpBot');
+const { initSupportBot } = require('./src/bot/supportBot');
 const { runMergeBackfillOnce } = require('./src/services/territoryMergeBackfill');
 const authRoutes = require('./src/routes/auth');
 const userRoutes = require('./src/routes/users');
@@ -81,6 +82,9 @@ const ALLOWED_ORIGINS = [
   process.env.FRONTEND_URL || 'http://localhost:5173',
   process.env.ADMIN_URL    || 'http://localhost:5174',
   process.env.LANDING_URL  || 'http://localhost:5175',
+  'https://georushweb.netlify.app',
+  'https://www.georush.uz',
+  'https://georush.uz',
 ].filter(Boolean);
 
 const corsOptions = {
@@ -218,6 +222,7 @@ async function start() {
     validateAuthSecret();
     await initializeDatabase();
     await initBot();
+    await initSupportBot();
 
     // Premium expiry sweep — darrov bir marta, keyin har soatda. unref() — process chiqishini bloklamaydi.
     sweepExpiredPremium();

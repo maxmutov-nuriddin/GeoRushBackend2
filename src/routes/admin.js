@@ -63,4 +63,8 @@ router.get('/promocodes',                  p.getPromoCodes);
 router.patch('/promocodes/:id',            p.togglePromoCode);
 router.delete('/promocodes/:id',           p.deletePromoCode);
 
+// ─── Support Chat ──────────────────────────────────────────────────────────────
+const supportRoutes = require('./adminSupport');
+router.use('/support', supportRoutes);
+
 module.exports = router;

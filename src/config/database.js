@@ -161,6 +161,40 @@ async function ensureCoreTables() {
     // User — access-token versiyasi (parol tiklash/logout-all'da eski tokenlarni bekor qilish).
     // Mavjud yozuvlar 0 oladi; JWT'dagi `tv` claim shu bilan solishtiriladi.
     `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "tokenVersion" INTEGER NOT NULL DEFAULT 0`,
+
+    // ── Support chat (Telegram support-bot + admin panel) ──────────────────────
+    // prisma db push ISHLATILMAYDI — jadvallar shu yerda raw SQL bilan yaratiladi.
+    `CREATE TABLE IF NOT EXISTS "SupportChat" (
+       "id"            TEXT NOT NULL,
+       "tgChatId"      TEXT NOT NULL,
+       "tgName"        TEXT,
+       "tgUsername"    TEXT,
+       "status"        TEXT NOT NULL DEFAULT 'open',
+       "unreadCount"   INTEGER NOT NULL DEFAULT 0,
+       "lastMessageAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       "createdAt"     TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       "updatedAt"     TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "SupportChat_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "SupportChat_tgChatId_key" ON "SupportChat" ("tgChatId")`,
+    `CREATE INDEX IF NOT EXISTS "SupportChat_lastMessageAt_idx" ON "SupportChat" ("lastMessageAt")`,
+    `CREATE TABLE IF NOT EXISTS "SupportMessage" (
+       "id"        TEXT NOT NULL,
+       "chatId"    TEXT NOT NULL,
+       "sender"    TEXT NOT NULL,
+       "text"      TEXT NOT NULL,
+       "messageId" TEXT,
+       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "SupportMessage_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE INDEX IF NOT EXISTS "SupportMessage_chatId_createdAt_idx" ON "SupportMessage" ("chatId", "createdAt")`,
+    // FK + cascade (chat o'chsa xabarlar ham o'chadi) — idempotent (DO bloki).
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'SupportMessage_chatId_fkey') THEN
+         ALTER TABLE "SupportMessage" ADD CONSTRAINT "SupportMessage_chatId_fkey"
+           FOREIGN KEY ("chatId") REFERENCES "SupportChat"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
   ];
 
   let ok = 0;

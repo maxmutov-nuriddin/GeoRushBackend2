@@ -300,3 +300,29 @@ model PremiumPurchase {
   @@index([createdAt])
   @@index([userId])
 }
+
+model SupportChat {
+  id           String           @id @default(uuid())
+  tgChatId     String           @unique
+  tgName       String?
+  tgUsername   String?
+  status       String           @default("open") // "open" | "closed"
+  unreadCount  Int              @default(0)
+  lastMessageAt DateTime        @default(now())
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  messages     SupportMessage[]
+}
+
+model SupportMessage {
+  id           String       @id @default(uuid())
+  chatId       String
+  chat         SupportChat  @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender       String       // "user" | "admin"
+  text         String
+  messageId    String?      // Telegram dagi xabar ID si (ixtiyoriy)
+  createdAt    DateTime     @default(now())
+
+  @@index([chatId, createdAt])
+}

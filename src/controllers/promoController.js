@@ -1,4 +1,5 @@
 const { prisma } = require('../config/database');
+const { baseSomFor, discountedSom } = require('../services/premiumLedger');
 
 const TIERS = ['all', 'pro', 'ultra'];
 const PERIODS = ['all', 'monthly', 'yearly'];
@@ -133,13 +134,25 @@ async function checkPromoCode(req, res, next) {
       return res.status(400).json({ error: 'Siz bu promokodni allaqachon ishlatgansiz', code: 'ALREADY_USED' });
     }
 
-    res.json({
+    const out = {
       valid: true,
       discountPct: promo.discountPct,
       code: promo.code,
       appliesTier: promo.appliesTier || 'all',
       appliesPeriod: promo.appliesPeriod || 'all',
-    });
+    };
+
+    // Tanlangan tarif/davr berilган bo'lsa — chegirma qo'llanган YAKUNIY summани ham qaytaramiz
+    // (app "qancha to'lash"ни ko'rsatishi uchun). Chegirma faqat promo mos kelган tarif/davrга tegadi.
+    if (tier && period) {
+      const baseSom = baseSomFor(tier, period);
+      const finalSom = discountedSom(tier, period, promo.discountPct);
+      out.baseSom = baseSom;       // chegirmasiz to'liq narx
+      out.finalSom = finalSom;     // chegirmadan keyin — QANCHA TO'LASH
+      out.savedSom = baseSom - finalSom; // qancha tejaldi
+    }
+
+    res.json(out);
   } catch (err) {
     next(err);
   }

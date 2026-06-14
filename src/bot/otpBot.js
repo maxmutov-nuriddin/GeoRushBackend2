@@ -121,6 +121,58 @@ function formatSom(amount) {
   return amount.toLocaleString('uz-UZ').replace(/,/g, ' ');
 }
 
+// ── Asosiy menyu tugmalari: Obuna + Yordam (DOIM ko'rinadigan persistent klaviatura) ──
+const MENU_PREMIUM = '💎 Obuna';
+const MENU_HELP = '🆘 Yordam';
+function mainMenuRow() {
+  return [{ text: MENU_PREMIUM }, { text: MENU_HELP }];
+}
+// Raqam tasdiqlangandan keyin ham Obuna + Yordam tugmalari DOIM ko'rinib tursin
+// (avval remove_keyboard bilan klaviatura butunlay yo'qolardi).
+function mainMenuKeyboard() {
+  return { keyboard: [mainMenuRow()], resize_keyboard: true, is_persistent: true };
+}
+
+// Premium tariflari — /premium komandasi VA "💎 Obuna" tugmasi shuni ishlatadi.
+async function sendPremiumInfo(chatId) {
+  if (!bot) return;
+  try {
+    const user = await prisma.user.findFirst({
+      where: { telegramChatId: String(chatId) },
+      select: { username: true, isPremium: true, premiumUntil: true, premiumTier: true },
+    });
+    if (user && isActivePremium(user)) {
+      const until = new Date(user.premiumUntil).toLocaleDateString('uz-UZ');
+      const tierName = (user.premiumTier || 'pro').toUpperCase();
+      return bot.sendMessage(chatId,
+        `@${user.username} — Premium ${tierName} faol\nMuddati: ${until}\n\nLimitlar va imtiyozlar faollashtirilgan.`);
+    }
+    return bot.sendMessage(chatId,
+      'GeoRush Premium tariflari:\n\n' +
+      '1. 💎 PRO — 39,900 so\'m / 150 Stars\n' +
+      '• 🛡️ Hudud himoyasi (daraja marjasi 5)\n' +
+      '• ⚡ 2x XP va 🪙 1.5x GeoCoins\n' +
+      '• 🎁 2 500 welcome coin va jamoa yaratish\n\n' +
+      '2. 👑 ULTRA — 79,900 so\'m / 300 Stars\n' +
+      '• 🛡️ Qat\'iy himoya (cheksiz hududlar)\n' +
+      '• ⚡ 3x XP va 🪙 2x GeoCoins\n' +
+      '• 🎁 7 500 welcome coin, cheksiz jamoa a\'zolari va barcha skinlar bepul!\n\n' +
+      'Obuna bo\'lish uchun GeoRush ilovasini oching → Premium → tarifni tanlab to\'lang (Telegram Stars).');
+  } catch { /* jim */ }
+}
+
+// "🆘 Yordam" — support botга havola (alohida bot). Username SUPPORT_BOT_USERNAME env'дан.
+async function sendSupportLink(chatId) {
+  if (!bot) return;
+  const username = (process.env.SUPPORT_BOT_USERNAME || '').replace(/^@/, '');
+  if (username) {
+    return bot.sendMessage(chatId,
+      '🆘 Yordam kerakmi? Quyidagi tugma orqali qo\'llab-quvvatlash botiga o\'ting — savolingizni yozing, jamoamiz javob beradi:',
+      { reply_markup: { inline_keyboard: [[{ text: '💬 Qo\'llab-quvvatlashga yozish', url: `https://t.me/${username}` }]] } });
+  }
+  return bot.sendMessage(chatId, '🆘 Yordam uchun @fortisweb_support bilan bog\'laning.');
+}
+
 // Stars invoice yuborish
 async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthly', promoCode = null) {
   if (!bot) throw new Error('Bot ishlamayapti');
@@ -362,12 +414,15 @@ async function initBot() {
     // ── /start (token yo'q) ───────────────────────────────────────────────────
     bot.onText(/^\/start$/, (msg) => {
       bot.sendMessage(msg.chat.id,
-        '👋 Salom! GeoRush tasdiqlash boti.\n\n📱 Telefon raqamingizni ulashing:',
+        '👋 Salom! GeoRush botiga xush kelibsiz.\n\n📱 Ro\'yxatdan o\'tish/ulanish uchun raqamingizni ulashing, yoki quyidagi tugmalardan foydalaning:',
         {
           reply_markup: {
-            keyboard: [[{ text: '📱 Raqamni ulashish', request_contact: true }]],
+            keyboard: [
+              [{ text: '📱 Raqamni ulashish', request_contact: true }],
+              mainMenuRow(), // 💎 Obuna  +  🆘 Yordam (doim ko'rinadi)
+            ],
             resize_keyboard: true,
-            one_time_keyboard: true,
+            is_persistent: true,
           },
         }
       );
@@ -388,42 +443,11 @@ async function initBot() {
     });
 
     // ── /premium — Premium haqida ma'lumot ────────────────────────────────────
-    bot.onText(/^\/premium$/, async (msg) => {
-      const chatId = String(msg.chat.id);
-      try {
-        const user = await prisma.user.findFirst({
-          where: { telegramChatId: chatId },
-          select: { username: true, isPremium: true, premiumUntil: true, premiumTier: true }
-        });
+    bot.onText(/^\/premium$/, (msg) => sendPremiumInfo(msg.chat.id));
 
-        if (!user) {
-          return bot.sendMessage(chatId,
-            '❌ Akkauntingiz botga ulanmagan.\n\n/link komandasi bilan ulang.',
-          );
-        }
-
-        if (isActivePremium(user)) {
-          const until = new Date(user.premiumUntil).toLocaleDateString('uz-UZ');
-          const tierName = (user.premiumTier || 'pro').toUpperCase();
-          return bot.sendMessage(chatId,
-            `@${user.username} — Premium ${tierName} faol\nMuddati: ${until}\n\nLimitlar va imtiyozlar faollashtirilgan.`
-          );
-        }
-
-        bot.sendMessage(chatId,
-          'GeoRush Premium tariflari:\n\n' +
-          '1. 💎 PRO — 39,900 so\'m / 150 Stars\n' +
-          '• 🛡️ Hudud himoyasi (daraja marjasi 5)\n' +
-          '• ⚡ 2x XP va 🪙 1.5x GeoCoins\n' +
-          '• 🎁 2 500 welcome coin va jamoa yaratish\n\n' +
-          '2. 👑 ULTRA — 79,900 so\'m / 300 Stars\n' +
-          '• 🛡️ Qat\'iy himoya (cheksiz hududlar)\n' +
-          '• ⚡ 3x XP va 🪙 2x GeoCoins\n' +
-          '• 🎁 7 500 welcome coin, cheksiz jamoa a\'zolari va barcha skinlar bepul!\n\n' +
-          'Obuna bo\'lish uchun GeoRush ilovasini oching → Premium → tarifni tanlab to\'lang (Telegram Stars).'
-        );
-      } catch {}
-    });
+    // ── Menyu tugmalari ───────────────────────────────────────────────────────
+    bot.onText(/^💎 Obuna$/, (msg) => sendPremiumInfo(msg.chat.id));
+    bot.onText(/^🆘 Yordam$/, (msg) => sendSupportLink(msg.chat.id));
 
     // ── Barcha xabarlar ───────────────────────────────────────────────────────
     bot.on('message', async (msg) => {
@@ -535,7 +559,7 @@ async function initBot() {
         }).catch(() => {});
         bot.sendMessage(chatId,
           `✅ Raqam tasdiqlandi!\n\n🔑 Sizning kodingiz:\n\n<code>${otpPlain}</code>\n\n⏱ Kod 5 daqiqa amal qiladi.`,
-          { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } }
+          { parse_mode: 'HTML', reply_markup: mainMenuKeyboard() }
         );
         logger.info(`Bot OTP yuborildi: chatId=${chatId}`);
         return;
@@ -558,7 +582,7 @@ async function initBot() {
           });
           bot.sendMessage(chatId,
             `✅ @${existing.username}, akkauntingiz Telegram ga ulandi!\n\nEndi GeoRush ilovasidan Premium sotib olishingiz mumkin (Telegram Stars).`,
-            { reply_markup: { remove_keyboard: true } }
+            { reply_markup: mainMenuKeyboard() }
           );
         } else {
           bot.sendMessage(chatId,
