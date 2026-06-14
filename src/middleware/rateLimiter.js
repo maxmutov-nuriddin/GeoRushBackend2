@@ -1,8 +1,13 @@
 const rateLimit = require('express-rate-limit');
 
+// Umumiy per-IP backstop. 500 → 2000 (15 daqiqaga) ko'tarildi: mobil operatorlar ko'p
+// o'yinchini BITTA NAT-IP ortiga qo'yadi → 500 ularga yetmасди. Endi haqiqiy per-akkaunt
+// nazorat userRateLimiter (300/daq) + auth endpoint limitlari (login 3/7daq h.k.); bu esa
+// faqat ekstremal IP-flood'ga qarshi qo'pol himoya. Ko'tarish — faqat KENGAYTIRADI, hech
+// narsani buzmaydi.
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 500,
+  max: 2000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please slow down.' },

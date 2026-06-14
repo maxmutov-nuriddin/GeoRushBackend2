@@ -5,6 +5,7 @@ const { prisma } = require('../config/database');
 const { getIo } = require('../socket/ioInstance');
 const { tierOf, entitlements } = require('../config/tiers');
 const { escapeHtml } = require('../utils/telegram');
+const { invalidateUserCache } = require('../middleware/auth');
 
 async function getProfile(req, res, next) {
   try {
@@ -117,11 +118,18 @@ async function changePassword(req, res, next) {
     if (!valid) return res.status(400).json({ error: 'Current password is incorrect' });
 
     const newHash = await bcrypt.hash(newPassword, 12);
+    // Parol o'zgartirilganda HAMMA qurilmadan chiqarish:
+    //  - tokenVersion++ → boshqa qurilmalardagi mavjud access tokenlar darhol bekor bo'ladi
+    //  - barcha refresh tokenlar o'chiriladi → ular yangi token ololmaydi (qayta login shart)
+    // Joriy qurilma ham chiqib, yangi parol bilan qayta kiradi (xavfsiz, kutilgan xulq).
+    // Mijozlar 401 → refresh urinadi → refresh yo'q → login ekraniga (silliq, crash yo'q).
     await prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: newHash }
+      data: { passwordHash: newHash, tokenVersion: { increment: 1 } }
     });
-    res.json({ message: 'Password updated' });
+    await prisma.refreshToken.deleteMany({ where: { userId } });
+    invalidateUserCache(userId);
+    res.json({ message: 'Password updated', loggedOutEverywhere: true });
   } catch (err) {
     next(err);
   }

@@ -41,6 +41,7 @@ const shopRoutes    = require('./src/routes/shop');
 const premiumRoutes = require('./src/routes/premium');
 const contactRoutes = require('./src/routes/contact');
 const { globalLimiter } = require('./src/middleware/rateLimiter');
+const { securityMonitor } = require('./src/middleware/securityMonitor');
 const errorHandler = require('./src/middleware/errorHandler');
 const logger = require('./src/utils/logger');
 const { prisma } = require('./src/config/database');
@@ -121,10 +122,39 @@ if (isRedisEnabled()) {
   logger.info('Socket.IO Redis adapter yoqildi (scale-out rejimi)');
 }
 
-app.use(helmet({ contentSecurityPolicy: false }));
+// HTTPS majburiy — Render TLS'ni reverse-proxy'da tugatadi va ichkariga http uzatadi.
+// Productionда http kelsa, https'ga 301 redirect (x-forwarded-proto orqali). Render har doim
+// x-forwarded-proto qo'yadi → redirect-loop bo'lmaydi. Lokal/dev'да (header yo'q) ishlamaydi.
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' && req.headers['x-forwarded-proto'] === 'http') {
+    return res.redirect(301, `https://${req.headers.host}${req.originalUrl}`);
+  }
+  next();
+});
+
+app.use(helmet({
+  // HSTS — brauzerni shu domenga FAQAT HTTPS bilan ulanishga majbur qiladi (1 yil).
+  hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+  // CSP — faqat HTML render'da amal qiladi (JSON API javoblariga ta'sirsiz). /map sahifasi
+  // leaflet (unpkg) + OpenStreetMap plitkalari + inline skript/uslub ishlatadi — shularga ruxsat.
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
+      imgSrc: ["'self'", 'data:', 'https://*.tile.openstreetmap.org', 'https://unpkg.com'],
+      connectSrc: ["'self'", ...ALLOWED_ORIGINS],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'self'"],
+    },
+  },
+}));
 app.use(cors(corsOptions));
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (msg) => logger.info(msg.trim()) } }));
+// Anomaliya monitoringi (401/403 spike, request spike) — boshqa middleware'lardan oldin.
+app.use(securityMonitor);
 // Body-size limit: 2MB. API faqat JSON qabul qiladi (fayl yuklash yo'q); eng katta
 // payload — oflayn trail (MAX_TRAIL_POINTS=500 nuqta, ~20KB) — 2MB'dan ancha kichik.
 // Avval 10mb edi — kerakmas darajada katta DoS yuzasi ochiq turardi.

@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { prisma } = require('../config/database');
+const { hitUserRateLimit } = require('./userRateLimiter');
 
 // ── Foydalanuvchi cache (30 soniya TTL) ───────────────────────────────────────
 // Har REST so'rovda DB ga bormaslik uchun. Ban/delete/role o'zgarganda
@@ -17,6 +18,47 @@ function _getCached(uid) {
 function _setCache(uid, user) { _userCache.set(uid, { user, at: Date.now() }); }
 function invalidateUserCache(uid) { _userCache.delete(uid); }
 
+// ── Secrets 1 — Bosqich 2: token manbai (Bearer header YOKI httpOnly cookie) ──
+// Token AVVAL Authorization: Bearer'dan olinadi (mobil + joriy web — XULQ AYNAN O'ZGARMAYDI).
+// Bearer YO'Q bo'lsa, httpOnly cookie (gr_at) ko'riladi (kelajakdagi web klient uchun).
+// Cookie cross-site (SameSite=None) → CSRF himoyasi SHART: faqat Origin allowed ro'yxatда
+// VA custom header (X-Requested-With) bo'lganda qabul qilinadi. Cross-site hujumchi custom
+// header qo'sha olmaydi — CORS preflight ALLOWED_ORIGINS bilan uni bloklaydi.
+const ALLOWED_ORIGINS = [
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  process.env.ADMIN_URL    || 'http://localhost:5174',
+  process.env.LANDING_URL  || 'http://localhost:5175',
+].filter(Boolean);
+const ACCESS_COOKIE = 'gr_at';
+
+function _readCookie(req, name) {
+  const raw = req.headers.cookie;
+  if (!raw) return null;
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i === -1) continue;
+    if (part.slice(0, i).trim() === name) {
+      const v = part.slice(i + 1).trim();
+      try { return decodeURIComponent(v); } catch { return v; }
+    }
+  }
+  return null;
+}
+
+function _extractToken(req) {
+  const h = req.headers.authorization;
+  if (h && h.startsWith('Bearer ')) return h.slice(7);
+  // Bearer yo'q → cookie fallback (faqat CSRF-xavfsiz bo'lsa)
+  const cookieTok = _readCookie(req, ACCESS_COOKIE);
+  if (cookieTok) {
+    const origin = req.headers.origin;
+    const csrfOk = !!req.headers['x-requested-with'];
+    const originOk = !!origin && ALLOWED_ORIGINS.includes(origin);
+    if (csrfOk && originOk) return cookieTok;
+  }
+  return null;
+}
+
 const USER_SELECT = {
   id: true, username: true, phone: true, teamId: true, color: true, xp: true, level: true,
   totalArea: true, totalDistance: true, territoriesCaptured: true, territoriesLost: true,
@@ -27,12 +69,11 @@ const USER_SELECT = {
 };
 
 async function authenticate(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = _extractToken(req);
+  if (!token) {
     return res.status(401).json({ error: 'Missing or invalid authorization header' });
   }
 
-  const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     let user = _getCached(decoded.userId);
@@ -50,6 +91,19 @@ async function authenticate(req, res, next) {
     if (typeof decoded.tv === 'number' && typeof user.tokenVersion === 'number'
         && decoded.tv !== user.tokenVersion) {
       return res.status(401).json({ error: 'Sessiya bekor qilingan, qaytadan kiring', code: 'TOKEN_REVOKED' });
+    }
+
+    // Per-user API rate-limit (IP emas — har akkaunt bo'yicha). Login PUBLIC bo'lgani uchun
+    // bu yerga kelmaydi — faqat authenticate qilingan REST so'rovlar sanaladi. Jonli xarita
+    // socketда, u ham bu sanoqqa kirmaydi. Limit oshsa 429 + Retry-After.
+    const rl = hitUserRateLimit(user.id);
+    if (!rl.ok) {
+      res.set('Retry-After', String(rl.retryAfterSec));
+      return res.status(429).json({
+        error: 'Juda ko\'p so\'rov yuborildi. Biroz kuting.',
+        code: 'USER_RATE_LIMITED',
+        retryAfterSeconds: rl.retryAfterSec,
+      });
     }
 
     req.user = user;
