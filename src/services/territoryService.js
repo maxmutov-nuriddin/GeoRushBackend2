@@ -196,7 +196,8 @@ async function captureTerritory(userId, rawPoints) {
     throw Object.assign(new Error(`Territory too small (min ${constants.TERRITORY_MIN_AREA_M2} m²)`), { status: 400, code: 'AREA_TOO_SMALL' });
   }
   if (area > constants.TERRITORY_MAX_AREA_M2) {
-    throw Object.assign(new Error('Territory too large (max 5 km²)'), { status: 400, code: 'AREA_TOO_LARGE' });
+    // Xabar chegaraга moslab dinamik — constants o'zgarsa o'zi yangilanadi (qattiq "5 km²" emas).
+    throw Object.assign(new Error(`Territory too large (max ${constants.TERRITORY_MAX_AREA_M2 / 1_000_000} km²)`), { status: 400, code: 'AREA_TOO_LARGE' });
   }
   if (polygonPoints.length < constants.MIN_TRAIL_POINTS_FOR_POLYGON) {
     throw Object.assign(new Error('Not enough points'), { status: 400, code: 'NOT_ENOUGH_POINTS' });
