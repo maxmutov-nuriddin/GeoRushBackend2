@@ -32,9 +32,15 @@ async function initSupportBot() {
   }
 
   try {
-    supportBot = new TelegramBot(token, { polling: true });
+    // Scale-out himoyasi (OTP botdagi bilan bir xil): Telegram bitta tokenга faqat BITTA
+    // polling iste'molchiga ruxsat beradi. Ko'p instance ishlatilsa, faqat bittasida polling
+    // qolsin — qolganlarida BOT_POLLING=false. Polling o'chiq instance ham xabar YUBORA oladi
+    // (sendReplyFromWeb/sendMessage polling talab qilmaydi), faqat KELGAN xabarni tinglamaydi.
+    // Default (BOT_POLLING o'rnatilmagan) → polling YOQIQ — bitta instance uchun hech nima o'zgarmaydi.
+    const pollingEnabled = process.env.BOT_POLLING !== 'false';
+    supportBot = new TelegramBot(token, { polling: pollingEnabled });
     botUsername = (await supportBot.getMe()).username; // bir marta keshlaymiz
-    logger.info(`Support Bot started successfully (@${botUsername}).`);
+    logger.info(`Support Bot started successfully (@${botUsername})${pollingEnabled ? '' : ' (faqat yuborish — polling o\'chiq)'}.`);
 
     // Har qanday kelgan xabarni tinglash
     supportBot.on('message', async (msg) => {
