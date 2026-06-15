@@ -170,7 +170,7 @@ async function sendSupportLink(chatId) {
       '🆘 Yordam kerakmi? Quyidagi tugma orqali qo\'llab-quvvatlash botiga o\'ting — savolingizni yozing, jamoamiz javob beradi:',
       { reply_markup: { inline_keyboard: [[{ text: '💬 Qo\'llab-quvvatlashga yozish', url: `https://t.me/${username}` }]] } });
   }
-  return bot.sendMessage(chatId, '🆘 Yordam uchun @fortisweb_support bilan bog\'laning.');
+  return bot.sendMessage(chatId, '🆘 Yordam uchun @GeoRushSupportBot bilan bog\'laning.');
 }
 
 // Stars invoice yuborish
@@ -327,7 +327,7 @@ async function handleSuccessfulPayment(msg) {
     logger.info(`Premium activated: userId=${payload.userId}, tier=${tier}, period=${period}, until=${until}`);
   } catch (err) {
     logger.error('Premium activation error:', err.message);
-    await bot.sendMessage(msg.chat.id, '⚠️ Xatolik yuz berdi. @fortisweb_support bilan bog\'laning.');
+    await bot.sendMessage(msg.chat.id, '⚠️ Xatolik yuz berdi. @GeoRushSupportBot bilan bog\'laning.');
   }
 }
 
