@@ -152,7 +152,15 @@ async function handleStartCommand(msg) {
 // Foydalanuvchidan kelgan xabar
 async function handleUserMessage(msg, adminChatId) {
   const tgChatId = String(msg.chat.id);
-  const text = msg.text || '[Media/Fayl xabari]';
+  // Rasm bormi? Telegram bir nechta o'lchamni beradi — eng kattasini olamiz.
+  const photoFileId = (msg.photo && msg.photo.length)
+    ? msg.photo[msg.photo.length - 1].file_id
+    : null;
+  // "Fayl sifatida" yuborilgan rasm/hujjat — msg.document'da keladi (photo emas).
+  const documentFileId = msg.document ? msg.document.file_id : null;
+  // Caption matni (yoki media turига qarab belgи); aks holda oddiy matn.
+  const text = msg.text || msg.caption
+    || (photoFileId ? '[📷 Rasm]' : documentFileId ? `[📎 Fayl: ${msg.document.file_name || 'hujjat'}]` : '[Media/Fayl xabari]');
   const tgName = [msg.chat.first_name, msg.chat.last_name].filter(Boolean).join(' ') || 'Foydalanuvchi';
   const tgUsername = msg.chat.username ? `@${msg.chat.username}` : null;
 
@@ -194,15 +202,37 @@ async function handleUserMessage(msg, adminChatId) {
     });
   }
 
-  // Admin guruhiga yuboramiz — xabar TAGIDA "Javob berish" tugmasi (bosib javob yoziladi)
+  // Admin guruhiga yuboramiz — xabar TAGIDA "Javob berish" tugmasi (bosib javob yoziladi).
+  // Rasm bo'lsa sendPhoto (file_id orqali — bizning serverga/DBга saqlanmaydi, faqat
+  // Telegram serveri orqali to'g'ridan-to'g'ri uzatiladi). Caption ichida ham ID bor —
+  // shu sababli admin rasmga reply qilса handleAdminReply ID ni o'qiy oladi.
   if (adminChatId) {
-    const adminText = `🚨 <b>Yangi murojaat</b>\n\n👤 <b>Kimdan:</b> ${escapeHtml(tgName)} ${tgUsername ? `(${tgUsername})` : ''}\n🆔 <b>ID:</b> <code>${tgChatId}</code>\n\n💬 <b>Xabar:</b>\n${escapeHtml(text)}`;
-    await supportBot.sendMessage(adminChatId, adminText, {
-      parse_mode: 'HTML',
-      reply_markup: {
-        inline_keyboard: [[{ text: '✍️ Javob berish', callback_data: `reply:${tgChatId}` }]],
-      },
-    });
+    const caption = msg.caption ? `\n\n💬 <b>Xabar:</b>\n${escapeHtml(msg.caption)}` : '';
+    const adminText = `🚨 <b>Yangi murojaat</b>\n\n👤 <b>Kimdan:</b> ${escapeHtml(tgName)} ${tgUsername ? `(${tgUsername})` : ''}\n🆔 <b>ID:</b> <code>${tgChatId}</code>`;
+    const replyMarkup = {
+      inline_keyboard: [[{ text: '✍️ Javob berish', callback_data: `reply:${tgChatId}` }]],
+    };
+
+    if (photoFileId) {
+      await supportBot.sendPhoto(adminChatId, photoFileId, {
+        caption: `${adminText}${caption}`,
+        parse_mode: 'HTML',
+        reply_markup: replyMarkup,
+      });
+    } else if (documentFileId) {
+      // Fayl sifatида yuborilган rasm/hujjat — sendDocument (file_id orqali, saqlanmaydi).
+      await supportBot.sendDocument(adminChatId, documentFileId, {
+        caption: `${adminText}${caption}`,
+        parse_mode: 'HTML',
+        reply_markup: replyMarkup,
+      });
+    } else {
+      const fullText = `${adminText}\n\n💬 <b>Xabar:</b>\n${escapeHtml(text)}`;
+      await supportBot.sendMessage(adminChatId, fullText, {
+        parse_mode: 'HTML',
+        reply_markup: replyMarkup,
+      });
+    }
   }
 
   // Foydalanuvchiga avtomatik javob qaytaramiz
@@ -224,17 +254,40 @@ async function handleUserMessage(msg, adminChatId) {
 
 // Admindan (guruhdan) kelgan javob (Reply)
 async function handleAdminReply(msg) {
-  const replyText = msg.text || '[Media/Fayl javobi]';
-  
-  // Asl xabardagi "ID: 12345678" qismini qidiramiz
-  const originalText = msg.reply_to_message.text || '';
+  // Admin rasm bilan javob berса — eng katta o'lchamli rasmning file_id'sini olamiz.
+  const photoFileId = (msg.photo && msg.photo.length)
+    ? msg.photo[msg.photo.length - 1].file_id
+    : null;
+  // Admin "fayl sifatида" rasm/hujjat yuborса — msg.document'да keladi.
+  const documentFileId = msg.document ? msg.document.file_id : null;
+  const replyText = msg.text || msg.caption
+    || (photoFileId ? '[📷 Rasm]' : documentFileId ? `[📎 Fayl: ${msg.document.file_name || 'hujjat'}]` : '[Media/Fayl javobi]');
+
+  // Asl xabardagi "ID: 12345678" qismini qidiramiz.
+  // Rasmli murojaatда matn .caption'да bo'ladi (.text emas) — ikkalasini ham tekshiramiz.
+  const originalText = msg.reply_to_message.text || msg.reply_to_message.caption || '';
   const idMatch = originalText.match(/🆔 ID:\s*(\d+)/);
   if (!idMatch) return; // ID topilmadi, xabar foydalanuvchiniki emas
 
   const targetTgChatId = idMatch[1];
 
-  // Foydalanuvchiga yuboramiz
-  await supportBot.sendMessage(targetTgChatId, `💬 <b>Yordam xizmati:</b>\n\n${escapeHtml(replyText)}`, { parse_mode: 'HTML' });
+  // Foydalanuvchiga yuboramiz — rasm bo'lsa sendPhoto (file_id orqali, hech qayerga
+  // saqlanmaydi), aks holda oddiy matn.
+  if (photoFileId) {
+    const cap = msg.caption ? `\n\n${escapeHtml(msg.caption)}` : '';
+    await supportBot.sendPhoto(targetTgChatId, photoFileId, {
+      caption: `💬 <b>Yordam xizmati:</b>${cap}`,
+      parse_mode: 'HTML',
+    });
+  } else if (documentFileId) {
+    const cap = msg.caption ? `\n\n${escapeHtml(msg.caption)}` : '';
+    await supportBot.sendDocument(targetTgChatId, documentFileId, {
+      caption: `💬 <b>Yordam xizmati:</b>${cap}`,
+      parse_mode: 'HTML',
+    });
+  } else {
+    await supportBot.sendMessage(targetTgChatId, `💬 <b>Yordam xizmati:</b>\n\n${escapeHtml(replyText)}`, { parse_mode: 'HTML' });
+  }
 
   // Adminга tasdiq — "Xabaringiz jo'natildi"
   await supportBot.sendMessage(msg.chat.id, '✅ Xabaringiz foydalanuvchiga jo\'natildi.', {
