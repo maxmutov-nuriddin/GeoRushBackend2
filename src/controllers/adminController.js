@@ -8,6 +8,7 @@ const { TIERS } = require('../config/tiers');
 const { invalidateUserCache } = require('../middleware/auth');
 const { recordPremiumPurchase, discountedSom, baseSomFor } = require('../services/premiumLedger');
 const { mergeAllOwnTerritories } = require('../services/territoryMergeBackfill');
+const { logAdminAction } = require('../services/auditLog');
 
 // Admin pagination uchun `take` qiymatini chegaralash — `?limit=999999` kabi so'rov
 // katta javob/DoS yaratmasin. Default destructuring (20/30/50) saqlanadi; faqat yuqori
@@ -276,6 +277,7 @@ async function givePremium(req, res, next) {
       });
     }
 
+    logAdminAction(req.user?.id, 'admin_premium_grant', user.id, { tier, days, isBonus, coinsGiven: welcomeCoins });
     res.json({ ok: true, user: { ...user, _id: user.id }, addedDays: days, tier, isBonus, coinsGiven: welcomeCoins });
   } catch (err) { next(err); }
 }
@@ -287,6 +289,7 @@ async function removePremium(req, res, next) {
       data: { isPremium: false, premiumUntil: null, premiumTier: 'free', premiumIsGift: false },
       select: { id: true, username: true, isPremium: true }
     });
+    logAdminAction(req.user?.id, 'admin_premium_remove', user.id, { username: user.username });
     res.json({ ok: true, user: { ...user, _id: user.id } });
   } catch (err) { next(err); }
 }
@@ -302,6 +305,7 @@ async function giveCoins(req, res, next) {
       data: { coins: { increment: Math.round(Number(amount)) } },
       select: { id: true, username: true, coins: true }
     });
+    logAdminAction(req.user?.id, 'admin_coins', user.id, { given: Math.round(Number(amount)), reason });
     res.json({ ok: true, username: user.username, coins: user.coins, given: Math.round(Number(amount)), reason });
   } catch (err) { next(err); }
 }
@@ -332,6 +336,7 @@ async function banUser(req, res, next) {
       }
     }
 
+    logAdminAction(req.user?.id, Boolean(banned) ? 'admin_ban' : 'admin_unban', user.id, { username: user.username });
     res.json({ user: { _id: user.id, username: user.username, isBanned: user.isBanned } });
   } catch (err) { next(err); }
 }
@@ -349,6 +354,7 @@ async function toggleAdmin(req, res, next) {
       select: { id: true, username: true, isAdmin: true }
     });
     invalidateUserCache(user.id);
+    logAdminAction(req.user?.id, 'admin_role', user.id, { isAdmin: user.isAdmin, username: user.username });
     res.json({ user: { ...user, _id: user.id } });
   } catch (err) { next(err); }
 }
@@ -407,6 +413,8 @@ async function deleteUser(req, res, next) {
       }
     }
 
+    // targetId BERILMAYDI — user o'chirildi, FK buziladi; id'ni data'ga yozamiz.
+    logAdminAction(req.user?.id, 'admin_delete_user', null, { deletedUserId: userId, territoriesRemoved: territories.length });
     res.json({ message: 'O\'chirildi' });
   } catch (err) { next(err); }
 }

@@ -1,8 +1,26 @@
 const router = require('express').Router();
 const { adminAuth } = require('../middleware/adminAuth');
 const c = require('../controllers/adminController');
+const ins = require('../controllers/adminInsightsController');
+const { sendBroadcast } = require('../controllers/adminBroadcastController');
+const { getAuditLog } = require('../services/auditLog');
 
 router.use(adminAuth);
+
+// ─── Insights (read-only analitika — yangi) ─────────────────────────────────────
+router.get('/insights/geo',            ins.getGeoDistribution);
+router.get('/insights/revenue',        ins.getRevenueBreakdown);
+router.get('/insights/referrals',      ins.getReferralFunnel);
+router.get('/insights/retention',      ins.getRetentionCohorts);
+router.get('/insights/repeat-cheaters',ins.getRepeatCheaters);
+router.get('/insights/support',        ins.getSupportMetrics);
+router.get('/insights/promo-stats',    ins.getPromoStats);
+
+// ─── Broadcast push (action — yangi) ────────────────────────────────────────────
+router.post('/broadcast',              sendBroadcast);
+
+// ─── Audit log (kim qaysi admin amalini qildi — yangi) ──────────────────────────
+router.get('/audit',                   getAuditLog);
 
 // ─── Own profile ───────────────────────────────────────────────────────────────
 router.get('/me',                          c.getMe);
