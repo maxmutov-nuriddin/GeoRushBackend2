@@ -2,7 +2,7 @@ const { prisma } = require('../config/database');
 const { getTerritoriesInBounds, getUserTerritories, deleteTerritory, captureTerritory } = require('../services/territoryService');
 const { runPostCaptureEffects } = require('../services/captureEffects');
 const { getUserTrail, resetUserTrail } = require('../socket/handlers/locationHandler');
-const { haversineDistance } = require('../services/geoService');
+const { haversineDistance, pointInPolygon } = require('../services/geoService');
 const { tierOf, entitlements } = require('../config/tiers');
 const constants = require('../config/constants');
 const logger = require('../utils/logger');
@@ -142,6 +142,32 @@ async function getMyStats(req, res, next) {
   }
 }
 
+// Yopuvchi tomon (oxiri→boshi to'g'ri chizig'i) foydalanuvchining O'Z hududi ustidan o'tadimi?
+// Ochiq halqani QO'LDA saqlashda kengaytirishga ruxsat berish uchun. Chiziqni nuqtalarga bo'lib,
+// har biri foydalanuvchining biror hududi ichida ekanini tekshiramiz (kamida 80% ichida bo'lsa — ha).
+async function closingEdgeOverOwnTerritory(userId, start, end) {
+  try {
+    const terrs = await getUserTerritories(userId);
+    if (!terrs.length) return false;
+    const rings = terrs
+      .map((t) => t.polygon && t.polygon.coordinates && t.polygon.coordinates[0])
+      .filter((r) => Array.isArray(r) && r.length >= 3)
+      .map((r) => r.map(([lng, lat]) => [lat, lng])); // GeoJSON [lng,lat] → pointInPolygon [lat,lng]
+    if (!rings.length) return false;
+    const N = 10;
+    let inside = 0;
+    for (let i = 0; i <= N; i++) {
+      const f = i / N;
+      const lat = start[0] + (end[0] - start[0]) * f;
+      const lng = start[1] + (end[1] - start[1]) * f;
+      if (rings.some((r) => pointInPolygon(lat, lng, r))) inside++;
+    }
+    return inside / (N + 1) >= 0.8;
+  } catch (_) {
+    return false; // shubhada — rad etamiz (xavfsiz tomon)
+  }
+}
+
 async function captureFromRest(req, res, next) {
   try {
     const userId = String(req.user.id || req.user._id);
@@ -168,13 +194,21 @@ async function captureFromRest(req, res, next) {
     // ── Yopilish sharti: oxirgi nuqta boshlang'ich nuqtaga yaqin bo'lishi SHART ──
     // Halqa start'ga qaytib yopilmasa — saqlamaymiz. Avval ochiq trail oxirini boshiga
     // to'g'ri chiziq bilan ulab majburan yopilardi (start'ga qaytmasdan zabt etish).
+    const allowOpen = !!(req.body && req.body.allowOpen);
     const start = trail[0];
     const end = trail[trail.length - 1];
-    if (haversineDistance(start[0], start[1], end[0], end[1]) > constants.TERRITORY_CLOSE_DISTANCE_M) {
-      return res.status(400).json({
-        error: 'Hududni yopish uchun boshlang\'ich nuqtaga qayting',
-        code: 'LOOP_NOT_CLOSED',
-      });
+    const gap = haversineDistance(start[0], start[1], end[0], end[1]);
+    if (gap > constants.TERRITORY_CLOSE_DISTANCE_M) {
+      // Halqa ochiq. QO'LDA saqlash (allowOpen) — FAQAT yopuvchi tomon (oxiri→boshi) foydalanuvchining
+      // O'Z mavjud hududi ustidan o'tsa ruxsat (hududni kengaytirish). Mavjud hudud bo'lmasa yoki
+      // yopuvchi tomon bo'sh joydan o'tsa — saqlamaymiz (yurilmagan maydonni "yopib olish"dan himoya).
+      let ok = false;
+      if (allowOpen) ok = await closingEdgeOverOwnTerritory(userId, start, end);
+      if (!ok) {
+        return res.status(400).json(allowOpen
+          ? { error: 'Hududni kengaytirish uchun yopiluvchi tomon sizning hududingiz ustidan o\'tishi kerak', code: 'EXTEND_NEEDS_TERRITORY' }
+          : { error: 'Hududni yopish uchun boshlang\'ich nuqtaga qayting', code: 'LOOP_NOT_CLOSED' });
+      }
     }
 
     const polygon = [...trail, trail[0]];
