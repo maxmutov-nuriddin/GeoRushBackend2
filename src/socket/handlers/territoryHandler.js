@@ -1,7 +1,7 @@
 const { captureTerritory } = require('../../services/territoryService');
 const { runPostCaptureEffects } = require('../../services/captureEffects');
 const { getUserTrail, resetUserTrail } = require('./locationHandler');
-const { detectClosedPolygon } = require('../../services/geoService');
+const { haversineDistance } = require('../../services/geoService');
 const onlineStore = require('../../services/onlineStore');
 const constants = require('../../config/constants');
 const logger = require('../../utils/logger');
@@ -17,12 +17,23 @@ async function processCaptureFromServerTrail(socket, io, userId) {
     return;
   }
 
-  // Avval geometrik kesishish orqali polygon aniqlaymiz
-  let polygon = detectClosedPolygon(trail);
-  if (!polygon) {
-    // Frontend proximity bilan yopgan bo'lishi mumkin — trail ni boshiga ulab yopamiz
-    polygon = [...trail, trail[0]];
+  // ── Yopilish sharti: oxirgi nuqta boshlang'ich nuqtaga yaqin bo'lishi SHART ──
+  // Halqa start'ga qaytib yopilmasa — saqlamaymiz (na auto, na qo'lda). Avval ochiq
+  // trail oxirini boshiga to'g'ri chiziq bilan ulab MAJBURAN yopilardi (kartada keraksiz
+  // diagonal chiziq + start'ga qaytmasdan zabt etish). Server yagona haqiqat manbai.
+  const start = trail[0];
+  const end = trail[trail.length - 1];
+  const distToStart = haversineDistance(start[0], start[1], end[0], end[1]);
+  if (distToStart > constants.TERRITORY_CLOSE_DISTANCE_M) {
+    socket.emit('territory:error', {
+      code: 'LOOP_NOT_CLOSED',
+      message: 'Hududni yopish uchun boshlang\'ich nuqtaga qayting',
+    });
+    return;
   }
+
+  // Start'ga qaytildi — trailni boshiga ulab halqani yopamiz.
+  const polygon = [...trail, trail[0]];
 
   try {
     const result = await captureTerritory(userId, polygon);

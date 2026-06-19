@@ -2,7 +2,7 @@ const { prisma } = require('../config/database');
 const { getTerritoriesInBounds, getUserTerritories, deleteTerritory, captureTerritory } = require('../services/territoryService');
 const { runPostCaptureEffects } = require('../services/captureEffects');
 const { getUserTrail, resetUserTrail } = require('../socket/handlers/locationHandler');
-const { detectClosedPolygon, haversineDistance } = require('../services/geoService');
+const { haversineDistance } = require('../services/geoService');
 const { tierOf, entitlements } = require('../config/tiers');
 const constants = require('../config/constants');
 const logger = require('../utils/logger');
@@ -165,8 +165,19 @@ async function captureFromRest(req, res, next) {
       });
     }
 
-    let polygon = detectClosedPolygon(trail);
-    if (!polygon) polygon = [...trail, trail[0]];
+    // ── Yopilish sharti: oxirgi nuqta boshlang'ich nuqtaga yaqin bo'lishi SHART ──
+    // Halqa start'ga qaytib yopilmasa — saqlamaymiz. Avval ochiq trail oxirini boshiga
+    // to'g'ri chiziq bilan ulab majburan yopilardi (start'ga qaytmasdan zabt etish).
+    const start = trail[0];
+    const end = trail[trail.length - 1];
+    if (haversineDistance(start[0], start[1], end[0], end[1]) > constants.TERRITORY_CLOSE_DISTANCE_M) {
+      return res.status(400).json({
+        error: 'Hududni yopish uchun boshlang\'ich nuqtaga qayting',
+        code: 'LOOP_NOT_CLOSED',
+      });
+    }
+
+    const polygon = [...trail, trail[0]];
 
     const result = await captureTerritory(userId, polygon);
 

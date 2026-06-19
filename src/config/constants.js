@@ -22,6 +22,21 @@ module.exports = {
   TERRITORY_MAX_AREA_M2: 15_000_000, // Max 15 km²
   MAX_TRAIL_POINTS: parseInt(process.env.MAX_TRAIL_POINTS || '5000'),
   MIN_TRAIL_POINTS_FOR_POLYGON: 4,
+  // Hudud yopilishi uchun oxirgi nuqta boshlang'ich nuqtaga shu masofadan (m) yaqin
+  // bo'lishi SHART. Aks holda saqlanmaydi (na auto, na qo'lda). Mijozdagi auto-yopilish
+  // ~20m da ishlaydi — server GPS drift uchun biroz kengroq (30m) chegara qo'yadi.
+  TERRITORY_CLOSE_DISTANCE_M: parseFloat(process.env.TERRITORY_CLOSE_DISTANCE_M || '30'),
+
+  // ── Halqa (loop) ↔ chiziq (borib-kelish) ajratish ──────────────────────────
+  // Trail kompaktligi (Polsby-Popper: 4π·Area/Perimeter²) shu chegaradan PAST bo'lsa,
+  // trail "cho'zilgan chiziq/borib-kelish" deb hisoblanadi → poligon ichini (oyoqlar
+  // orasidagi xanjar) emas, yurgan yo'l atrofida YO'LAK (buffer) egallanadi. Yuqori
+  // bo'lsa — haqiqiy halqa (blok aylanish), ichi to'ldiriladi (avvalgi xulq).
+  // 1.0=doira, 0.785=kvadrat; cho'zilgan xanjar/koridor → 0 ga yaqin.
+  LOOP_COMPACTNESS_MIN: parseFloat(process.env.LOOP_COMPACTNESS_MIN || '0.15'),
+  // Chiziq trailida yo'lak radiusi (m, har tomonga). ~15m: GPS aniqligi + ko'cha kengligi,
+  // mukofot yurgan masofaga mutanosib (abuzdan himoya).
+  CORRIDOR_RADIUS_M: parseFloat(process.env.CORRIDOR_RADIUS_M || '15'),
   // ~2m — GPS jitter/zigzag (shovqin)ni tozalaydi, chekka tekis chiqadi. Avval ~0.5m edi:
   // juda mayda bo'lgani uchun shovqin nuqtalar o'tib ketib, hudud chekkasi tikanli ko'rinardi.
   // Shakl va maydon (area) deyarli o'zgarmaydi — faqat ortiqcha sachragan nuqtalar olib tashlanadi.

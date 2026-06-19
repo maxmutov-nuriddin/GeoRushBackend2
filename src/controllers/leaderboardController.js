@@ -41,7 +41,8 @@ async function getPlayerLeaderboard(req, res, next) {
 
     const players = await prisma.user.findMany({
       where: filter,
-      orderBy: { xp: 'desc' },
+      // id tiebreaker — teng XP'da tartib aniq va getMyRank bilan mos bo'lishi uchun.
+      orderBy: [{ xp: 'desc' }, { id: 'asc' }],
       take: limit,
       include: { team: { select: { name: true, color: true, tag: true } } },
     });
@@ -101,8 +102,18 @@ async function getTeamLeaderboard(req, res, next) {
 async function getMyRank(req, res, next) {
   try {
     const myXp = req.user.xp;
+    const myId = req.user.id;
+    // Teng XP'da rank aniq bo'lishi uchun id bo'yicha tiebreaker — reyting ro'yxati bilan
+    // bir xil tartib (orderBy: xp desc, id asc). Aks holda bir xil XP'li (masalan, 0)
+    // barcha o'yinchilarga bir xil rank chiqardi (top-2 dan keyin hamma "3" ko'rinardi).
     const rank = await prisma.user.count({
-      where: { xp: { gt: myXp }, isAdmin: false }
+      where: {
+        isAdmin: false,
+        OR: [
+          { xp: { gt: myXp } },
+          { xp: myXp, id: { lt: myId } },
+        ],
+      },
     });
     res.json({ rank: rank + 1 });
   } catch (err) {

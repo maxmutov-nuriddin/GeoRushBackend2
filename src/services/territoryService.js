@@ -1,7 +1,9 @@
 const { prisma } = require('../config/database');
 const { Prisma } = require('@prisma/client');
 const polygonClipping = require('polygon-clipping');
-const { polygonAreaM2, geojsonPolygonAreaM2, largestPolygonOf, differenceGeomJS, estimateOverlapFraction, simplifyPolygon, pointInPolygon, segmentsIntersect } = require('./geoService');
+const turfBuffer = require('@turf/buffer').default || require('@turf/buffer');
+const { lineString: turfLineString } = require('@turf/helpers');
+const { polygonAreaM2, geojsonPolygonAreaM2, largestPolygonOf, differenceGeomJS, estimateOverlapFraction, simplifyPolygon, pointInPolygon, segmentsIntersect, haversineDistance } = require('./geoService');
 const { bufferToMulti, closeMerge, TOLERANCE_M, HALF_KM } = require('./territoryMergeBackfill');
 const constants = require('../config/constants');
 const { tierOf, entitlements } = require('../config/tiers');
@@ -157,6 +159,28 @@ async function differenceTwoGeoms(subjectGeoPolygon, clipGeoPolygon) {
   }
 }
 
+// Chiziq (borib-kelish) trail uchun: yurgan yo'l atrofida radiusM kenglikdagi YO'LAK (buffer).
+// Poligon ichini (oyoqlar orasidagi xanjar) EMAS, faqat yurilgan yo'l atrofini egallaydi →
+// mukofot yurgan masofaga mutanosib (abuzdan himoya), yurmagan oraliq egallanmaydi.
+// latlngPoints: [[lat,lng],...]. Natija: { coordinates: [[lng,lat]...rings], area } yoki null.
+function corridorFromPath(latlngPoints, radiusM) {
+  try {
+    const coords = latlngPoints.map(([lat, lng]) => [lng, lat]);
+    if (coords.length < 2) return null;
+    const buffered = turfBuffer(turfLineString(coords), radiusM / 1000, { units: 'kilometers' });
+    if (!buffered || !buffered.geometry) return null;
+    const g = buffered.geometry;
+    if (g.type === 'Polygon' && g.coordinates && g.coordinates[0]) {
+      return { coordinates: g.coordinates, area: geojsonPolygonAreaM2(g.coordinates) };
+    }
+    if (g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) {
+      const largest = largestPolygonOf(g.coordinates);
+      return largest ? { coordinates: largest.coordinates, area: largest.area } : null;
+    }
+    return null;
+  } catch { return null; }
+}
+
 // Convert [[lat,lng],...] trail points to GeoJSON Polygon coordinates [[[lng,lat],...]]
 function trailToGeoJSON(points) {
   const coords = points.map(([lat, lng]) => [lng, lat]);
@@ -188,9 +212,21 @@ function isActivePremium(u) {
 }
 
 async function captureTerritory(userId, rawPoints) {
-  // Simplify polygon to reduce point count and avoid self-intersection artifacts
+  // Simplify trail to reduce point count and noise.
   const polygonPoints = simplifyPolygon(rawPoints, constants.POLYGON_SIMPLIFY_TOLERANCE);
-  const area = polygonAreaM2(polygonPoints);
+  if (polygonPoints.length < constants.MIN_TRAIL_POINTS_FOR_POLYGON) {
+    throw Object.assign(new Error('Not enough points'), { status: 400, code: 'NOT_ENOUGH_POINTS' });
+  }
+
+  // ── YO'LAK (corridor) modeli ──────────────────────────────────────────────
+  // Egallangan hudud = yurgan yo'l atrofidagi CORRIDOR_RADIUS_M kenglikdagi YO'LAK (buffer).
+  // Borib-kelishda (out-and-back) ikki oyoq orasidagi XANJAR EGALLANMAYDI — faqat yurilgan
+  // yo'l. Mukofot yurgan masofaga mutanosib → "yurmagan yerni yurdim" deb belgilashdan himoya.
+  const corridor = corridorFromPath(polygonPoints, constants.CORRIDOR_RADIUS_M);
+  if (!corridor || !corridor.coordinates || !corridor.coordinates[0]) {
+    throw Object.assign(new Error('Not enough points'), { status: 400, code: 'NOT_ENOUGH_POINTS' });
+  }
+  const area = corridor.area;
 
   if (area < constants.TERRITORY_MIN_AREA_M2) {
     throw Object.assign(new Error(`Territory too small (min ${constants.TERRITORY_MIN_AREA_M2} m²)`), { status: 400, code: 'AREA_TOO_SMALL' });
@@ -198,9 +234,6 @@ async function captureTerritory(userId, rawPoints) {
   if (area > constants.TERRITORY_MAX_AREA_M2) {
     // Xabar chegaraга moslab dinamik — constants o'zgarsa o'zi yangilanadi (qattiq "5 km²" emas).
     throw Object.assign(new Error(`Territory too large (max ${constants.TERRITORY_MAX_AREA_M2 / 1_000_000} km²)`), { status: 400, code: 'AREA_TOO_LARGE' });
-  }
-  if (polygonPoints.length < constants.MIN_TRAIL_POINTS_FOR_POLYGON) {
-    throw Object.assign(new Error('Not enough points'), { status: 400, code: 'NOT_ENOUGH_POINTS' });
   }
 
   const user = await prisma.user.findUnique({
@@ -213,8 +246,8 @@ async function captureTerritory(userId, rawPoints) {
   // BIRLASHADIGAN egallash hudud sonini OSHIRMAYDI, shuning uchun limitга qarshi emas.
   const myEnt = entitlements(tierOf(user));
 
-  const geoCoords = trailToGeoJSON(polygonPoints);
-  const geoPolygon = { type: 'Polygon', coordinates: [geoCoords] };
+  // Yo'lak poligoni (yuqorida qurilgan) — egallash/kesish/overlap shu shakl ustida ishlaydi.
+  const geoPolygon = { type: 'Polygon', coordinates: corridor.coordinates };
   const geoPolygonStr = JSON.stringify(geoPolygon);
 
   // Find all territories that intersect with the new polygon
