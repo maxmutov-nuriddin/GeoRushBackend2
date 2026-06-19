@@ -72,6 +72,7 @@ async function getPromoCodes(req, res, next) {
   try {
     const promoCodes = await prisma.promoCode.findMany({
       orderBy: { createdAt: 'desc' },
+      take: 1000, // promokodlar amalda kam; faqat eng yomon holat chegarasi
     });
     res.json({ promoCodes });
   } catch (err) {

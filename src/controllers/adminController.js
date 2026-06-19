@@ -534,7 +534,9 @@ async function getOnline(req, res, next) {
   try {
     const users = await prisma.user.findMany({
       where: { isOnline: true, isAdmin: false },
-      select: { id: true, username: true, color: true, level: true, lastSeen: true }
+      select: { id: true, username: true, color: true, level: true, lastSeen: true },
+      orderBy: { lastSeen: 'desc' },
+      take: 5000, // onlayn o'yinchilar soni — render chegarasi bilan bir xil
     });
     const mappedUsers = users.map(u => ({ ...u, _id: u.id }));
     res.json({ users: mappedUsers });
@@ -547,7 +549,8 @@ async function getUserWarnings(req, res, next) {
     const warnings = await prisma.warning.findMany({
       where: { userId: req.params.id },
       include: { admin: { select: { username: true } } },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      take: 500, // bitta userning ogohlantirishlari — amalda kam; faqat eng yomon holat chegarasi
     });
     const mappedWarnings = warnings.map(w => ({ ...w, _id: w.id }));
     res.json({ warnings: mappedWarnings });
@@ -676,7 +679,12 @@ async function getLiveMap(req, res, next) {
 
     const [territories, recentLogs, onlineUsers, allEvents] = await Promise.all([
       prisma.territory.findMany({
-        select: { id: true, ownerId: true, teamId: true, polygon: true, area: true, color: true, owner: { select: { username: true, color: true } } }
+        select: { id: true, ownerId: true, teamId: true, polygon: true, area: true, color: true, owner: { select: { username: true, color: true } } },
+        // Heatmap eng so'nggi hududlar bo'yicha; 5000 — shu fayldagi onlayn-render chegarasi
+        // bilan bir xil. Kam bo'lsa xulq o'zgarmaydi; ko'p bo'lsa og'ir poligon-JSONB payload
+        // va xotira chegaralanadi (avval BARCHA hudud cheksiz tortilardi).
+        orderBy: { capturedAt: 'desc' },
+        take: 5000,
       }),
       prisma.antiCheatLog.findMany({
         where: { createdAt: { gte: new Date(Date.now() - 3600000) }, lat: { not: null } },
@@ -686,14 +694,20 @@ async function getLiveMap(req, res, next) {
       }),
       prisma.user.findMany({
         where: { isOnline: true, isAdmin: false },
-        select: { id: true, username: true, color: true, level: true, lastLocation: true }
+        select: { id: true, username: true, color: true, level: true, lastLocation: true },
+        take: 5000, // onlayn o'yinchilar — render chegarasi bilan bir xil
       }),
       // territoryId null bo'lganlar (hududi allaqachon o'chirilgan eski eventlar)
       // hotspot bo'la olmaydi — ularni DB darajasida chiqarib tashlaymiz, aks holda
       // bu so'rov vaqt o'tishi bilan cheksiz o'sib live-map'ni sekinlashtiradi.
       prisma.gameEvent.findMany({
         where: { type: 'territory_captured', data: { not: null }, territoryId: { not: null } },
-        select: { territoryId: true, data: true }
+        select: { territoryId: true, data: true },
+        // Hotspot = SO'NGGI janglar. Eng yangi 10000 capture bilan cheklaymiz — jadval
+        // har zabt bilan abadiy o'sgani uchun bu so'rov vaqt o'tib eng katta sekinlashish
+        // manbai edi. Bundan kam capture bo'lsa natija aynan bir xil.
+        orderBy: { createdAt: 'desc' },
+        take: 10000,
       }),
     ]);
 
