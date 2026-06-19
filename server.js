@@ -43,6 +43,7 @@ const premiumRoutes = require('./src/routes/premium');
 const contactRoutes = require('./src/routes/contact');
 const { globalLimiter } = require('./src/middleware/rateLimiter');
 const { securityMonitor } = require('./src/middleware/securityMonitor');
+const { hppGuard } = require('./src/middleware/hpp');
 const errorHandler = require('./src/middleware/errorHandler');
 const logger = require('./src/utils/logger');
 const { prisma } = require('./src/config/database');
@@ -164,6 +165,8 @@ app.use(securityMonitor);
 // Avval 10mb edi — kerakmas darajada katta DoS yuzasi ochiq turardi.
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+// Takroriy query-paramlarni skalarga keltirib HTTP Parameter Pollution'ni yopadi.
+app.use(hppGuard);
 
 app.use('/api', globalLimiter);
 

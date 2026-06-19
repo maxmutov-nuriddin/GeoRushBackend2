@@ -51,6 +51,16 @@ function hashRefreshToken(raw) {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
+// Maxfiy qiymatlarni (OTP-hash, token) constant-time solishtirish — `===` har belgida
+// erta to'xtaб timing side-channel (necha belgi to'g'ri ekanini sizdirish) ochadi.
+// timingSafeEqual faqat teng uzunlikdagi bufer talab qiladi → avval uzunlikni tekshiramiz.
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const ba = Buffer.from(a), bb = Buffer.from(b);
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
 async function createRefreshToken(userId) {
   const token = crypto.randomBytes(REFRESH_TOKEN_BYTES).toString('hex');
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
@@ -214,8 +224,8 @@ async function verifyOtp(req, res, next) {
 
     const inputHash = crypto.createHash('sha256').update(otp.trim()).digest('hex');
     const isCorrect = existing.otpHash
-      ? existing.otpHash === inputHash
-      : existing.otp === otp.trim();
+      ? safeEqual(existing.otpHash, inputHash)
+      : safeEqual(existing.otp || '', otp.trim());
     if (!isCorrect) {
       recordFailedAttempt(ip);
       return res.status(400).json({ error: 'Noto\'g\'ri kod', code: 'WRONG_OTP' });

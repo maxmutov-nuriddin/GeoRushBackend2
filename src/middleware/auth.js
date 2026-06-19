@@ -115,7 +115,14 @@ async function authenticate(req, res, next) {
 }
 
 async function authenticateSocket(socket, next) {
-  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+  // Token AVVAL handshake.auth/query'dan (mobil + joriy web — XULQ O'ZGARMAYDI).
+  // Topilmasa httpOnly cookie (gr_at) ko'riladi — bu web klientni localStorage'siz
+  // (XSS token o'g'irlay olmaydigan) cookie rejimiga o'tkazishga imkon beradi.
+  // CSWSH xavfsiz: io server CORS faqat ALLOWED_ORIGINS handshake'iga ruxsat beradi,
+  // shuning uchun begona sayt qurbonning cookie'si bilan socket ocha olmaydi.
+  const token = socket.handshake.auth?.token
+    || socket.handshake.query?.token
+    || _readCookie(socket.handshake, ACCESS_COOKIE);
   if (!token) return next(new Error('Authentication required'));
 
   try {
