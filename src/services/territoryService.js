@@ -5,6 +5,7 @@ const turfBuffer = require('@turf/buffer').default || require('@turf/buffer');
 const { lineString: turfLineString } = require('@turf/helpers');
 const { polygonAreaM2, geojsonPolygonAreaM2, largestPolygonOf, differenceGeomJS, estimateOverlapFraction, simplifyPolygon, pointInPolygon, segmentsIntersect, haversineDistance } = require('./geoService');
 const { bufferToMulti, closeMerge, TOLERANCE_M, HALF_KM } = require('./territoryMergeBackfill');
+const { maskBuildingsFromPolygon } = require('./buildingMaskService');
 const constants = require('../config/constants');
 const { tierOf, entitlements } = require('../config/tiers');
 const logger = require('../utils/logger');
@@ -226,7 +227,21 @@ async function captureTerritory(userId, rawPoints) {
   if (!corridor || !corridor.coordinates || !corridor.coordinates[0]) {
     throw Object.assign(new Error('Not enough points'), { status: 400, code: 'NOT_ENOUGH_POINTS' });
   }
-  const area = corridor.area;
+
+  // ── BINO NIQOBI (A) ────────────────────────────────────────────────────────
+  // Yo'lakdan OSM bino konturlarini ayiramiz → hudud chegarasiga chiqib qolgan TASHQI
+  // bino qismi kesiladi (chegara uy/yo'lak bo'yicha bukiladi, uy ustiga CHIQMAYDI — render'da
+  // KO'RINADI). HIMOYALANGAN: o'chirilgan/xato/timeout bo'lsa asl yo'lak ishlatiladi (egallash
+  // yiqilmaydi). Niqob natijasi min-maydondan kichik bo'lib qolsa ham asl yo'lakka qaytamiz.
+  let captureCoords = corridor.coordinates;
+  let area = corridor.area;
+  try {
+    const masked = await maskBuildingsFromPolygon(corridor.coordinates);
+    if (masked && masked.coordinates && masked.coordinates[0] && masked.area >= constants.TERRITORY_MIN_AREA_M2) {
+      captureCoords = masked.coordinates;
+      area = masked.area;
+    }
+  } catch (_) { /* fallback: asl yo'lak */ }
 
   if (area < constants.TERRITORY_MIN_AREA_M2) {
     throw Object.assign(new Error(`Territory too small (min ${constants.TERRITORY_MIN_AREA_M2} m²)`), { status: 400, code: 'AREA_TOO_SMALL' });
@@ -247,7 +262,7 @@ async function captureTerritory(userId, rawPoints) {
   const myEnt = entitlements(tierOf(user));
 
   // Yo'lak poligoni (yuqorida qurilgan) — egallash/kesish/overlap shu shakl ustida ishlaydi.
-  const geoPolygon = { type: 'Polygon', coordinates: corridor.coordinates };
+  const geoPolygon = { type: 'Polygon', coordinates: captureCoords };
   const geoPolygonStr = JSON.stringify(geoPolygon);
 
   // Find all territories that intersect with the new polygon
