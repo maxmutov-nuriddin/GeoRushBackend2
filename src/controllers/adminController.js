@@ -37,7 +37,7 @@ async function getStats(req, res, next) {
       coinsResult, revPurchase,
       revPurchaseMonth, paidPurchasesCount, freeGrantsCount, baseAgg, gameAgg,
       revToday, revWeek, revPro, revUltra, userAvg, usersInTeam, publicTeams, antiCheatTypes,
-      playSum, activeUsers, churnedUsers,
+      playSum, activeUsers, churnedUsers, dailyToday,
     ] = await Promise.all([
       prisma.user.count({ where: { isAdmin: false } }),
       prisma.user.count({ where: { isBanned: true } }),
@@ -93,7 +93,20 @@ async function getStats(req, res, next) {
       // Saqlanish: faol (30 kun ichida ko'rilgan) va chiqib ketgan (30 kundan oldin oxirgi marta)
       prisma.user.count({ where: { isAdmin: false, lastSeen: { gte: month } } }),
       prisma.user.count({ where: { isAdmin: false, lastSeen: { lt: month } } }),
+      // Bugungi kunlik agregat (DailyStat) — bugungi sessiya soni + ilova vaqti.
+      // dayKey today (lokal yarim tun) bilan bir xil — socket disconnect'dagi kalit bilan mos.
+      prisma.$queryRawUnsafe(
+        `SELECT "playtimeSec"::float8 AS playtime, "sessionCount" AS sessions
+           FROM "DailyStat" WHERE "date" = $1`,
+        `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+      ).catch(() => []),
     ]);
+
+    // Bugungi sessiya ko'rsatkichlari (DailyStat'dan)
+    const dayRow = Array.isArray(dailyToday) && dailyToday[0] ? dailyToday[0] : null;
+    const totalPlaytimeSecToday = dayRow ? Math.round(dayRow.playtime || 0) : 0;
+    const totalSessionsToday    = dayRow ? Number(dayRow.sessions || 0) : 0;
+    const avgSessionSecToday    = totalSessionsToday > 0 ? Math.round(totalPlaytimeSecToday / totalSessionsToday) : 0;
 
     // Taxminiy daromad (so'm)
     const estimatedRevenueSom = (premiumPro * 39900) + (premiumUltra * 79900);
@@ -145,6 +158,10 @@ async function getStats(req, res, next) {
       totalPlaytimeSec: playSum?._sum?.totalPlaytimeSec || 0,
       activeUsers,    // 30 kun ichida faol bo'lganlar
       churnedUsers,   // 30 kundan beri kirmaganlar (chiqib ketgan)
+      // ── Bugungi (kunlik) faollik — har kuni yangilanadi ──
+      avgSessionSecToday,      // bugungi o'rtacha sessiya (soniya)
+      totalPlaytimeSecToday,   // bugun ilovada o'tkazilgan jami vaqt (soniya)
+      totalSessionsToday,      // bugungi UMUMIY kirib-chiqishlar (UNIK EMAS)
     });
   } catch (err) { next(err); }
 }

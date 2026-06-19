@@ -195,6 +195,19 @@ async function ensureCoreTables() {
            FOREIGN KEY ("chatId") REFERENCES "SupportChat"("id") ON DELETE CASCADE ON UPDATE CASCADE;
        END IF;
      END $$`,
+
+    // ── DailyStat — kunlik sessiya agregati (dashboard "Bugungi faollik" kartalari) ──
+    // Har socket disconnect (oqilona sessiya)da bugungi qator increment qilinadi:
+    //   playtimeSec  — bugun ilovada o'tkazilgan jami soniya
+    //   sessionCount — bugungi UMUMIY kirib-chiqishlar (UNIK EMAS — har sessiya sanaladi)
+    // Kunlik UNIK kirganlar (DAU) alohida — User.lastSeen >= bugun bo'yicha hisoblanadi.
+    `CREATE TABLE IF NOT EXISTS "DailyStat" (
+       "date"         TEXT NOT NULL,
+       "playtimeSec"  BIGINT  NOT NULL DEFAULT 0,
+       "sessionCount" INTEGER NOT NULL DEFAULT 0,
+       "updatedAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "DailyStat_pkey" PRIMARY KEY ("date")
+     )`,
   ];
 
   let ok = 0;

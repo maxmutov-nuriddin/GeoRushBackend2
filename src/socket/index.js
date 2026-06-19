@@ -196,6 +196,27 @@ function initializeSocket(io) {
         logger.error('Error on socket disconnect', err);
       }
 
+      // Kunlik agregat (DailyStat) — bugungi UMUMIY kirib-chiqishlar (unik emas) + ilova vaqti.
+      // Kümulyativ User maydonlariga TEGMAYDI — alohida qo'shimcha. Xato bo'lsa ham disconnect
+      // oqimini buzmaydi (alohida try/catch). Kunlik UNIK kirganlar (DAU) — User.lastSeen orqali.
+      if (validSession) {
+        try {
+          const d = new Date();
+          const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          await prisma.$executeRawUnsafe(
+            `INSERT INTO "DailyStat" ("date","playtimeSec","sessionCount","updatedAt")
+             VALUES ($1, $2, 1, CURRENT_TIMESTAMP)
+             ON CONFLICT ("date") DO UPDATE
+               SET "playtimeSec"  = "DailyStat"."playtimeSec"  + $2,
+                   "sessionCount" = "DailyStat"."sessionCount" + 1,
+                   "updatedAt"    = CURRENT_TIMESTAMP`,
+            dayKey, sessionSec
+          );
+        } catch (err) {
+          logger.warn('DailyStat upsert skip:', err.message?.split('\n')[0]);
+        }
+      }
+
       if (teamId) io.to(`team:${teamId}`).emit('player:left', { userId });
     });
   });
