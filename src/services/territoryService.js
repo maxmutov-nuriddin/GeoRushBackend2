@@ -160,25 +160,41 @@ async function differenceTwoGeoms(subjectGeoPolygon, clipGeoPolygon) {
   }
 }
 
-// Chiziq (borib-kelish) trail uchun: yurgan yo'l atrofida radiusM kenglikdagi YO'LAK (buffer).
-// Poligon ichini (oyoqlar orasidagi xanjar) EMAS, faqat yurilgan yo'l atrofini egallaydi →
-// mukofot yurgan masofaga mutanosib (abuzdan himoya), yurmagan oraliq egallanmaydi.
-// latlngPoints: [[lat,lng],...]. Natija: { coordinates: [[lng,lat]...rings], area } yoki null.
+// Yurgan yo'l atrofida radiusM kenglikdagi YO'LAK (buffer) + yopiq halqa ICHINI to'ldirish.
+// Egallash doim yopiq ring bilan keladi (controller [...trail, trail[0]] yopadi). Tasmani yo'l
+// O'RAGAN maydon bilan birlashtiramiz (union) → hudud SOLID (teshiksiz). Borib-kelish (out-and-back)
+// ~0 maydon o'rab oladi → tasma bo'lib qoladi (yurmagan oraliqni belgilashdan himoya saqlanadi);
+// faqat haqiqiy halqalar to'ladi. latlngPoints: [[lat,lng],...]. Natija: { coordinates, area } yoki null.
 function corridorFromPath(latlngPoints, radiusM) {
   try {
     const coords = latlngPoints.map(([lat, lng]) => [lng, lat]);
     if (coords.length < 2) return null;
     const buffered = turfBuffer(turfLineString(coords), radiusM / 1000, { units: 'kilometers' });
-    if (!buffered || !buffered.geometry) return null;
-    const g = buffered.geometry;
-    if (g.type === 'Polygon' && g.coordinates && g.coordinates[0]) {
-      return { coordinates: g.coordinates, area: geojsonPolygonAreaM2(g.coordinates) };
+    const g = buffered && buffered.geometry;
+    // Tasmani MultiPolygon ko'rinishida yig'amiz (polygon-clipping formati).
+    let bandMulti = [];
+    if (g && g.type === 'Polygon' && g.coordinates && g.coordinates[0]) bandMulti = [g.coordinates];
+    else if (g && g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) bandMulti = g.coordinates;
+    if (!bandMulti.length) return null;
+
+    // Yo'l o'ragan maydonni (yopiq ring) tasmaga QO'SHAMIZ → halqa ichi to'ladi.
+    let resultMulti = bandMulti;
+    if (coords.length >= 4) {
+      const ring = coords.slice();
+      const a = ring[0], b = ring[ring.length - 1];
+      if (a[0] !== b[0] || a[1] !== b[1]) ring.push(a); // yopiq qilamiz
+      try {
+        const polygonClipping = require('polygon-clipping');
+        const unioned = polygonClipping.union(bandMulti, [ring]);
+        if (Array.isArray(unioned) && unioned.length) resultMulti = unioned;
+      } catch (_) { /* union ishlamasa — sof tasma */ }
     }
-    if (g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) {
-      const largest = largestPolygonOf(g.coordinates);
-      return largest ? { coordinates: largest.coordinates, area: largest.area } : null;
-    }
-    return null;
+
+    const largest = largestPolygonOf(resultMulti);
+    if (!largest || !largest.coordinates || !largest.coordinates[0]) return null;
+    // Ichki teshiklarni olib tashlaymiz — hudud SOLID bo'lsin (faqat tashqi halqa).
+    const solid = [largest.coordinates[0]];
+    return { coordinates: solid, area: geojsonPolygonAreaM2(solid) };
   } catch { return null; }
 }
 

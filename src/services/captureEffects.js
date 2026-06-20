@@ -31,12 +31,14 @@ async function emitInvasionNotifications(io, { attackerUsername, notifications }
     const pct = notif.capturePercent;
     const online = await onlineStore.get(notif.ownerId);
 
-    if (online) {
-      if (entitlements(online.tier || 'free').notifications === 'none') continue;
+    // 1) Onlayn (socket ulangan) — jonli in-app event. Lekin "online" bo'lsa ham app
+    //    BACKGROUND'da bo'lishi mumkin (socket darrov uzilmaydi, STALE_MS=3daq), shuning
+    //    uchun pastda push HAR DOIM yuboriladi; foreground'da mijoz OS-bannerni bostiradi.
+    if (online && entitlements(online.tier || 'free').notifications !== 'none') {
       io.to(`user:${notif.ownerId}`).emit('territory:invaded', { attackerUsername, percent: pct });
-      continue;
     }
 
+    // 2) Push — online holatidan QAT'I NAZAR (app tashqarisida/background'da kelishi uchun).
     let dbUser;
     try {
       dbUser = await prisma.user.findUnique({
@@ -47,22 +49,20 @@ async function emitInvasionNotifications(io, { attackerUsername, notifications }
       logger.warn('Invasion lookup failed', { ownerId: notif.ownerId, err: err.message });
       continue;
     }
-    if (!dbUser || entitlements(tierOf(dbUser)).notifications === 'none') continue;
+    if (!dbUser || !dbUser.expoPushToken || entitlements(tierOf(dbUser)).notifications === 'none') continue;
 
-    if (dbUser.expoPushToken) {
-      if (pct >= 100) {
-        await sendExpoPush(
-          dbUser.expoPushToken,
-          'GeoRush — Hudud yo\'qotildi! 💥',
-          `${attackerUsername} sizning hududingizni to'liq zabt etdi!`,
-        );
-      } else if (pct >= 25) {
-        await sendExpoPush(
-          dbUser.expoPushToken,
-          'GeoRush — Hududingiz hujum ostida! ⚠️',
-          `${attackerUsername} sizning hududingizni ${pct}% egalladi! Tezda qaytib keling!`,
-        );
-      }
+    if (pct >= 100) {
+      await sendExpoPush(
+        dbUser.expoPushToken,
+        'GeoRush — Hudud yo\'qotildi! 💥',
+        `${attackerUsername} sizning hududingizni to'liq zabt etdi!`,
+      );
+    } else if (pct >= 25) {
+      await sendExpoPush(
+        dbUser.expoPushToken,
+        'GeoRush — Hududingiz hujum ostida! ⚠️',
+        `${attackerUsername} sizning hududingizni ${pct}% egalladi! Tezda qaytib keling!`,
+      );
     }
   }
 }
