@@ -194,7 +194,7 @@ async function getUsers(req, res, next) {
     const [users, total] = await Promise.all([
       prisma.user.findMany({
         where,
-        select: { id: true, username: true, phone: true, color: true, xp: true, level: true, totalArea: true, territoriesCaptured: true, isOnline: true, isAdmin: true, isBanned: true, createdAt: true, lastSeen: true, teamId: true, termsAccepted: true },
+        select: { id: true, username: true, phone: true, color: true, xp: true, level: true, totalArea: true, territoriesCaptured: true, isOnline: true, isAdmin: true, isBanned: true, createdAt: true, lastSeen: true, teamId: true, termsAccepted: true, isPremium: true, premiumTier: true, premiumUntil: true, premiumIsGift: true },
         orderBy: { createdAt: 'desc' },
         skip,
         take: clampLimit(limit)
