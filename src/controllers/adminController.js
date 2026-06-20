@@ -34,6 +34,7 @@ async function getStats(req, res, next) {
       onlineUsers, antiCheatToday, warningsTotal,
       newToday, newYesterday, newWeek, newMonth,
       premiumTotal, premiumPro, premiumUltra,
+      premiumProPaid, premiumUltraPaid,
       premiumWeek, premiumMonth,
       coinsResult, revPurchase,
       revPurchaseMonth, paidPurchasesCount, freeGrantsCount, baseAgg, gameAgg,
@@ -58,6 +59,8 @@ async function getStats(req, res, next) {
       prisma.user.count({ where: { createdAt: { gte: month }, isAdmin: false } }),
       // Premium statistika — admin akkauntlari daromad/statistikaga kirmaydi (isAdmin: false)
       prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, isAdmin: false } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro', isAdmin: false } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra', isAdmin: false } }),
       prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro', premiumIsGift: false, isAdmin: false } }),
       prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra', premiumIsGift: false, isAdmin: false } }),
       prisma.user.count({ where: { isPremium: true, updatedAt: { gte: week }, isAdmin: false } }),
@@ -109,9 +112,9 @@ async function getStats(req, res, next) {
     const totalSessionsToday    = dayRow ? Number(dayRow.sessions || 0) : 0;
     const avgSessionSecToday    = totalSessionsToday > 0 ? Math.round(totalPlaytimeSecToday / totalSessionsToday) : 0;
 
-    // Taxminiy daromad (so'm)
-    const estimatedRevenueSom = (premiumPro * 39900) + (premiumUltra * 79900);
-    const estimatedRevenueStars = (premiumPro * 150) + (premiumUltra * 300);
+    // Taxminiy daromad (so'm) - faqat pul to'lab olinganlar asosida
+    const estimatedRevenueSom = (premiumProPaid * 39900) + (premiumUltraPaid * 79900);
+    const estimatedRevenueStars = (premiumProPaid * 150) + (premiumUltraPaid * 300);
 
     res.json({
       totalUsers, bannedUsers, adminUsers,
@@ -121,6 +124,7 @@ async function getStats(req, res, next) {
       newToday, newYesterday, newWeek, newMonth,
       // Premium
       premiumTotal, premiumPro, premiumUltra,
+      premiumProPaid, premiumUltraPaid,
       premiumWeek, premiumMonth,
       // Daromad (taxminiy — hozirgi aktiv obunalar asosida)
       estimatedRevenueSom,
@@ -170,7 +174,7 @@ async function getStats(req, res, next) {
 // ─── Users ─────────────────────────────────────────────────────────────────────
 async function getUsers(req, res, next) {
   try {
-    const { search = '', page = 1, limit = 20 } = req.query;
+    const { search = '', filter = 'all', page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
     
     const searchCondition = search ? {
@@ -179,7 +183,13 @@ async function getUsers(req, res, next) {
         { phone: { contains: search, mode: 'insensitive' } }
       ]
     } : {};
-    const where = { isAdmin: false, ...searchCondition };
+    
+    let filterCondition = {};
+    if (filter === 'premium') {
+      filterCondition = { isPremium: true, premiumUntil: { gt: new Date() } };
+    }
+
+    const where = { isAdmin: false, ...searchCondition, ...filterCondition };
 
     const [users, total] = await Promise.all([
       prisma.user.findMany({
@@ -844,7 +854,7 @@ async function getEconomy(req, res, next) {
 
     const [
       xpResult, coinsResult, topXp, topArea, topDist, topCoins,
-      premiumPro, premiumUltra, premiumNew7d, premiumNew30d,
+      premiumPro, premiumUltra, premiumProPaid, premiumUltraPaid, premiumNew7d, premiumNew30d,
       revAll, revMonth,
     ] = await Promise.all([
       prisma.user.aggregate({ _sum: { xp: true }, where: { isAdmin: false } }),
@@ -853,6 +863,8 @@ async function getEconomy(req, res, next) {
       prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, totalArea: true, isPremium: true, premiumTier: true }, orderBy: { totalArea: 'desc' }, take: 10 }),
       prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, totalDistance: true, isPremium: true, premiumTier: true }, orderBy: { totalDistance: 'desc' }, take: 10 }),
       prisma.user.findMany({ where: { isAdmin: false }, select: { id: true, username: true, color: true, coins: true, isPremium: true, premiumTier: true }, orderBy: { coins: 'desc' }, take: 10 }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro', isAdmin: false } }),
+      prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra', isAdmin: false } }),
       prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'pro', premiumIsGift: false, isAdmin: false } }),
       prisma.user.count({ where: { isPremium: true, premiumUntil: { gt: now }, premiumTier: 'ultra', premiumIsGift: false, isAdmin: false } }),
       prisma.user.count({ where: { isPremium: true, updatedAt: { gte: week }, isAdmin: false } }),
@@ -861,8 +873,8 @@ async function getEconomy(req, res, next) {
       prisma.premiumPurchase.aggregate({ where: { createdAt: { gte: month } }, _sum: { amountSom: true, amountStars: true } }).catch(() => null),
     ]);
 
-    const revSom   = premiumPro * 39900 + premiumUltra * 79900;
-    const revStars = premiumPro * 150   + premiumUltra * 300;
+    const revSom   = premiumProPaid * 39900 + premiumUltraPaid * 79900;
+    const revStars = premiumProPaid * 150   + premiumUltraPaid * 300;
 
     const mapIds = arr => arr.map(a => ({ ...a, _id: a.id }));
 
