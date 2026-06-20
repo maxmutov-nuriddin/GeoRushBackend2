@@ -4,6 +4,7 @@ const { validationResult } = require('express-validator');
 const { prisma } = require('../config/database');
 const { getIo } = require('../socket/ioInstance');
 const { tierOf, entitlements } = require('../config/tiers');
+const { getTerritoriesInBounds } = require('../services/territoryService');
 const { escapeHtml } = require('../utils/telegram');
 const { invalidateUserCache } = require('../middleware/auth');
 
@@ -363,23 +364,114 @@ async function getActivity(req, res, next) {
       windowDays: CAL_DAYS,
     };
 
+    // Strategik xarita — Ultra (heatmap tier). heatPoints eski ilovalar uchun saqlanadi.
     let heatPoints = [];
+    let strategic = null;
     if (ent.stats === 'heatmap') {
-      const terrs = await prisma.territory.findMany({
-        where: { ownerId: userId },
-        select: { polygon: true, area: true },
-        take: 300
-      });
-      heatPoints = terrs.map((tr) => {
-        const ring = tr.polygon?.coordinates?.[0] || [];
-        if (!ring.length) return null;
+      const asGeo = (p) => (typeof p === 'string' ? JSON.parse(p) : p);
+      const centroidOfRing = (ring) => {
+        if (!ring || !ring.length) return null;
         let lat = 0, lng = 0;
         for (const c of ring) { lng += c[0]; lat += c[1]; }
-        return [lat / ring.length, lng / ring.length, Math.min(1, (tr.area || 0) / 50000)];
-      }).filter(Boolean);
+        return [lat / ring.length, lng / ring.length];
+      };
+      const haversine = (a, b) => {
+        const R = 6371000, toR = Math.PI / 180;
+        const dLat = (b[0] - a[0]) * toR, dLng = (b[1] - a[1]) * toR;
+        const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * toR) * Math.cos(b[0] * toR) * Math.sin(dLng / 2) ** 2;
+        return 2 * R * Math.asin(Math.sqrt(s));
+      };
+
+      const myTerrs = await prisma.territory.findMany({
+        where: { ownerId: userId },
+        select: { id: true, polygon: true, area: true },
+        take: 300,
+      });
+
+      const mine = [];
+      let minLat = 90, minLng = 180, maxLat = -90, maxLng = -180;
+      for (const t of myTerrs) {
+        const ring = asGeo(t.polygon)?.coordinates?.[0] || [];
+        if (!ring.length) continue;
+        for (const [lng, lat] of ring) {
+          if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+          if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
+        }
+        mine.push({ polygon: ring, area: t.area || 0, centroid: centroidOfRing(ring) });
+      }
+
+      heatPoints = mine.map((m) => (m.centroid ? [m.centroid[0], m.centroid[1], Math.min(1, m.area / 50000)] : null)).filter(Boolean);
+
+      if (mine.length) {
+        const padLat = Math.max((maxLat - minLat) * 0.3, 0.002);
+        const padLng = Math.max((maxLng - minLng) * 0.3, 0.002);
+        const bbox = { swLat: minLat - padLat, swLng: minLng - padLng, neLat: maxLat + padLat, neLng: maxLng + padLng };
+
+        let inZone = [];
+        try { inZone = await getTerritoriesInBounds(bbox.swLat, bbox.swLng, bbox.neLat, bbox.neLng); } catch (_) { inZone = []; }
+
+        const rivals = [];
+        const areaByOwner = new Map(); // ownerId -> { username, color, area }
+        for (const t of inZone) {
+          if (String(t.ownerId) === userId) continue;
+          const ring = asGeo(t.polygon)?.coordinates?.[0] || [];
+          if (!ring.length) continue;
+          const color = t.ownerColor || '#ff4444';
+          const username = t.ownerUsername || '?';
+          rivals.push({ polygon: ring, area: t.area || 0, color, username, centroid: centroidOfRing(ring) });
+          const cur = areaByOwner.get(String(t.ownerId)) || { username, color, area: 0 };
+          cur.area += t.area || 0;
+          areaByOwner.set(String(t.ownerId), cur);
+        }
+
+        const myArea = mine.reduce((s, m) => s + m.area, 0);
+        const ownersSorted = [...areaByOwner.values(), { area: myArea, me: true }].sort((a, b) => b.area - a.area);
+        const rankInZone = ownersSorted.findIndex((o) => o.me) + 1;
+        const biggestNeighbor = [...areaByOwner.values()].sort((a, b) => b.area - a.area)[0] || null;
+
+        const myCentroids = mine.map((m) => m.centroid).filter(Boolean);
+        let contested = 0;
+        for (const r of rivals) {
+          if (r.centroid && myCentroids.some((mc) => haversine(mc, r.centroid) < 300)) contested++;
+        }
+
+        // Kengayish imkoniyatlari — bbox 6x6 to'r, bo'sh + menga yondosh kataklar
+        const GRID = 6;
+        const cellLat = (bbox.neLat - bbox.swLat) / GRID;
+        const cellLng = (bbox.neLng - bbox.swLng) / GRID;
+        const cellOf = (lat, lng) => [
+          Math.min(GRID - 1, Math.max(0, Math.floor((lat - bbox.swLat) / cellLat))),
+          Math.min(GRID - 1, Math.max(0, Math.floor((lng - bbox.swLng) / cellLng))),
+        ];
+        const occupied = new Set(); const mineCells = new Set();
+        for (const m of mine) { if (m.centroid) { const [r, c] = cellOf(m.centroid[0], m.centroid[1]); occupied.add(r + ',' + c); mineCells.add(r + ',' + c); } }
+        for (const r of rivals) { if (r.centroid) { const [a, b] = cellOf(r.centroid[0], r.centroid[1]); occupied.add(a + ',' + b); } }
+        const gaps = [];
+        for (const key of mineCells) {
+          const [r, c] = key.split(',').map(Number);
+          for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+            const nr = r + dr, nc = c + dc, nk = nr + ',' + nc;
+            if (nr < 0 || nc < 0 || nr >= GRID || nc >= GRID || occupied.has(nk) || gaps.some((g) => g.key === nk)) continue;
+            gaps.push({ key: nk, swLat: bbox.swLat + nr * cellLat, swLng: bbox.swLng + nc * cellLng, neLat: bbox.swLat + (nr + 1) * cellLat, neLng: bbox.swLng + (nc + 1) * cellLng });
+          }
+        }
+
+        strategic = {
+          bbox,
+          mine: mine.map((m) => ({ polygon: m.polygon, area: m.area })),
+          rivals: rivals.slice(0, 120).map((r) => ({ polygon: r.polygon, area: r.area, color: r.color, username: r.username })),
+          gaps: gaps.slice(0, 8).map(({ key, ...g }) => g),
+          myArea: Math.round(myArea),
+          myCount: mine.length,
+          rankInZone,
+          rivalCount: areaByOwner.size,
+          contested,
+          biggestNeighbor: biggestNeighbor ? { username: biggestNeighbor.username, area: Math.round(biggestNeighbor.area) } : null,
+        };
+      }
     }
 
-    res.json({ weekly, calendar, summary, heatPoints, stats: ent.stats });
+    res.json({ weekly, calendar, summary, heatPoints, strategic, stats: ent.stats });
   } catch (err) {
     next(err);
   }
