@@ -5,6 +5,7 @@ const { prisma } = require('../config/database');
 const { getIo } = require('../socket/ioInstance');
 const { tierOf, entitlements } = require('../config/tiers');
 const { getTerritoriesInBounds } = require('../services/territoryService');
+const { suggestRoadGaps } = require('../services/roadSuggestService');
 const { escapeHtml } = require('../utils/telegram');
 const { invalidateUserCache } = require('../middleware/auth');
 
@@ -470,21 +471,29 @@ async function getActivity(req, res, next) {
             if (mineHit || rivalHit) occupied.add(r + ',' + c);
           }
         }
-        const gaps = [];
+        const gridGaps = [];
         for (const key of mineCells) {
           const [r, c] = key.split(',').map(Number);
           for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
             const nr = r + dr, nc = c + dc, nk = nr + ',' + nc;
-            if (nr < 0 || nc < 0 || nr >= GRID || nc >= GRID || occupied.has(nk) || gaps.some((g) => g.key === nk)) continue;
-            gaps.push({ key: nk, ...rect(nr, nc) });
+            if (nr < 0 || nc < 0 || nr >= GRID || nc >= GRID || occupied.has(nk) || gridGaps.some((g) => g.key === nk)) continue;
+            gridGaps.push({ key: nk, ...rect(nr, nc) });
           }
         }
+
+        // Tavsiyalarni YO'L bo'ylab chizamiz — OSM yo'llaridan hudud chetidagi bo'sh bo'laklar.
+        // Yo'l ma'lumoti bo'lmasa (xato/timeout/bo'sh) — to'r-katak fallback.
+        let gaps = gridGaps.slice(0, 8).map(({ key, ...g }) => g);
+        try {
+          const roadGaps = await suggestRoadGaps(bbox, mine.map((m) => m.polygon), rivals.map((r) => r.polygon));
+          if (roadGaps && roadGaps.length) gaps = roadGaps;
+        } catch (_) { /* fallback: to'r-katak gaps */ }
 
         strategic = {
           bbox,
           mine: mine.map((m) => ({ polygon: m.polygon, area: m.area })),
           rivals: rivals.slice(0, 120).map((r) => ({ polygon: r.polygon, area: r.area, color: r.color, username: r.username })),
-          gaps: gaps.slice(0, 8).map(({ key, ...g }) => g),
+          gaps,
           myArea: Math.round(myArea),
           myCount: mine.length,
           rankInZone,
