@@ -403,8 +403,9 @@ async function getActivity(req, res, next) {
       heatPoints = mine.map((m) => (m.centroid ? [m.centroid[0], m.centroid[1], Math.min(1, m.area / 50000)] : null)).filter(Boolean);
 
       if (mine.length) {
-        const padLat = Math.max((maxLat - minLat) * 0.3, 0.002);
-        const padLng = Math.max((maxLng - minLng) * 0.3, 0.002);
+        // Yondosh rivallar tor quticha (bbox)dan tashqarida qolmasligi uchun kengroq padding.
+        const padLat = Math.max((maxLat - minLat) * 0.5, 0.005);
+        const padLng = Math.max((maxLng - minLng) * 0.5, 0.005);
         const bbox = { swLat: minLat - padLat, swLng: minLng - padLng, neLat: maxLat + padLat, neLng: maxLng + padLng };
 
         let inZone = [];
@@ -435,24 +436,47 @@ async function getActivity(req, res, next) {
           if (r.centroid && myCentroids.some((mc) => haversine(mc, r.centroid) < 300)) contested++;
         }
 
-        // Kengayish imkoniyatlari — bbox 6x6 to'r, bo'sh + menga yondosh kataklar
-        const GRID = 6;
+        // Nuqta-poligon ichidami (ray casting) — ring [lng,lat] formatida.
+        const pip = (lat, lng, ring) => {
+          let inside = false;
+          for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+            if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
+          }
+          return inside;
+        };
+        // Katak poligon bilan kesishadimi — markaz ichida YOKI poligon uchi katak ichida.
+        const cellHits = (ring, sLat, sLng, nLat, nLng) => {
+          if (pip((sLat + nLat) / 2, (sLng + nLng) / 2, ring)) return true;
+          for (const [lng, lat] of ring) {
+            if (lat >= sLat && lat <= nLat && lng >= sLng && lng <= nLng) return true;
+          }
+          return false;
+        };
+
+        // Kengayish imkoniyatlari — to'r kataklari POLIGON bilan kesishishига qarab band/bo'sh
+        // (markaz emas) → ✦ hudud ustiga tushmaydi, faqat haqiqatan bo'sh, chegaradagi kataklar.
+        const GRID = 9;
         const cellLat = (bbox.neLat - bbox.swLat) / GRID;
         const cellLng = (bbox.neLng - bbox.swLng) / GRID;
-        const cellOf = (lat, lng) => [
-          Math.min(GRID - 1, Math.max(0, Math.floor((lat - bbox.swLat) / cellLat))),
-          Math.min(GRID - 1, Math.max(0, Math.floor((lng - bbox.swLng) / cellLng))),
-        ];
+        const rect = (r, c) => ({ swLat: bbox.swLat + r * cellLat, swLng: bbox.swLng + c * cellLng, neLat: bbox.swLat + (r + 1) * cellLat, neLng: bbox.swLng + (c + 1) * cellLng });
         const occupied = new Set(); const mineCells = new Set();
-        for (const m of mine) { if (m.centroid) { const [r, c] = cellOf(m.centroid[0], m.centroid[1]); occupied.add(r + ',' + c); mineCells.add(r + ',' + c); } }
-        for (const r of rivals) { if (r.centroid) { const [a, b] = cellOf(r.centroid[0], r.centroid[1]); occupied.add(a + ',' + b); } }
+        for (let r = 0; r < GRID; r++) {
+          for (let c = 0; c < GRID; c++) {
+            const q = rect(r, c);
+            const mineHit = mine.some((m) => cellHits(m.polygon, q.swLat, q.swLng, q.neLat, q.neLng));
+            const rivalHit = !mineHit && rivals.some((rv) => cellHits(rv.polygon, q.swLat, q.swLng, q.neLat, q.neLng));
+            if (mineHit) mineCells.add(r + ',' + c);
+            if (mineHit || rivalHit) occupied.add(r + ',' + c);
+          }
+        }
         const gaps = [];
         for (const key of mineCells) {
           const [r, c] = key.split(',').map(Number);
           for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
             const nr = r + dr, nc = c + dc, nk = nr + ',' + nc;
             if (nr < 0 || nc < 0 || nr >= GRID || nc >= GRID || occupied.has(nk) || gaps.some((g) => g.key === nk)) continue;
-            gaps.push({ key: nk, swLat: bbox.swLat + nr * cellLat, swLng: bbox.swLng + nc * cellLng, neLat: bbox.swLat + (nr + 1) * cellLat, neLng: bbox.swLng + (nc + 1) * cellLng });
+            gaps.push({ key: nk, ...rect(nr, nc) });
           }
         }
 
