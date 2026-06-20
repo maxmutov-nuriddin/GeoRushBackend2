@@ -300,7 +300,9 @@ async function getActivity(req, res, next) {
       return res.status(403).json({ error: 'Statistika Pro yoki Ultra uchun', code: 'STATS_LOCKED' });
     }
 
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    // 13 haftalik (91 kun) faollik kalendari + streak uchun kengroq oyna olamiz.
+    const CAL_DAYS = 91;
+    const since = new Date(Date.now() - CAL_DAYS * 24 * 60 * 60 * 1000);
     const events = await prisma.gameEvent.findMany({
       where: {
         type: 'territory_captured',
@@ -310,17 +312,56 @@ async function getActivity(req, res, next) {
       select: { data: true, createdAt: true }
     });
 
-    const weekly = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - i);
-      const nextDate = new Date(d); nextDate.setDate(d.getDate() + 1);
-      const dayEvents = events.filter((e) => e.createdAt >= d && e.createdAt < nextDate);
-      weekly.push({
-        date: d.toISOString().slice(0, 10),
-        count: dayEvents.length,
-        area: dayEvents.reduce((sum, e) => sum + (e.data?.area || 0), 0),
-      });
+    // Kun bo'yicha guruhlash: { 'YYYY-MM-DD': { count, area } }
+    const byDay = new Map();
+    for (const e of events) {
+      const key = new Date(e.createdAt).toISOString().slice(0, 10);
+      const cur = byDay.get(key) || { count: 0, area: 0 };
+      cur.count += 1;
+      cur.area += e.data?.area || 0;
+      byDay.set(key, cur);
     }
+
+    // Faollik kalendari (eng eski → bugun), GitHub uslubidagi to'r uchun.
+    const calendar = [];
+    for (let i = CAL_DAYS - 1; i >= 0; i--) {
+      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const v = byDay.get(key) || { count: 0, area: 0 };
+      calendar.push({ date: key, count: v.count, area: v.area });
+    }
+
+    // Streak — bugundan (yoki kechadan) orqaga uzluksiz faol kunlar.
+    const todayKey = new Date(); todayKey.setHours(0, 0, 0, 0);
+    let current = 0;
+    for (let i = 0; ; i++) {
+      const d = new Date(todayKey); d.setDate(d.getDate() - i);
+      const v = byDay.get(d.toISOString().slice(0, 10));
+      if (v && v.count > 0) { current += 1; continue; }
+      // Bugun hali o'ynamagan bo'lsa ham streak buzilmaydi — kechadan boshlanadi.
+      if (i === 0) continue;
+      break;
+    }
+    // Eng uzun streak — oyna ichidagi maksimal uzluksiz seriya.
+    let longest = 0, run = 0;
+    for (const day of calendar) {
+      if (day.count > 0) { run += 1; longest = Math.max(longest, run); }
+      else run = 0;
+    }
+
+    const activeDays = calendar.filter((d) => d.count > 0).length;
+    const totalArea = calendar.reduce((s, d) => s + d.area, 0);
+    const totalCaptures = calendar.reduce((s, d) => s + d.count, 0);
+    const bestDay = calendar.reduce((b, d) => (d.count > (b?.count || 0) ? d : b), null);
+
+    // Eski ilova versiyalari uchun haftalik (oxirgi 7 kun) saqlanadi.
+    const weekly = calendar.slice(-7);
+
+    const summary = {
+      current, longest, activeDays, totalArea, totalCaptures,
+      bestDay: bestDay && bestDay.count > 0 ? bestDay : null,
+      windowDays: CAL_DAYS,
+    };
 
     let heatPoints = [];
     if (ent.stats === 'heatmap') {
@@ -338,7 +379,7 @@ async function getActivity(req, res, next) {
       }).filter(Boolean);
     }
 
-    res.json({ weekly, heatPoints, stats: ent.stats });
+    res.json({ weekly, calendar, summary, heatPoints, stats: ent.stats });
   } catch (err) {
     next(err);
   }
