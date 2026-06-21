@@ -4,10 +4,18 @@
 // HECH QACHON throw qilmaydi: xato/timeout → null (chaqiruvchi to'r-fallback'iga o'tadi).
 // buildingMaskService bilan bir xil pattern (fetch + bbox-kesh + qisqa timeout + graceful fallback).
 
-const OVERPASS_URL = process.env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter';
-const TIMEOUT_MS = parseInt(process.env.ROAD_SUGGEST_TIMEOUT_MS || '3500', 10);
+// Bir nechta Overpass mirror — biri sekin/ishlamasa keyingisiga o'tamiz (public API beqaror).
+// ENV OVERPASS_URL berilsa — birinchi bo'lib u sinaladi.
+const OVERPASS_ENDPOINTS = [
+  process.env.OVERPASS_URL,
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+].filter(Boolean);
+const TIMEOUT_MS = parseInt(process.env.ROAD_SUGGEST_TIMEOUT_MS || '7000', 10);
 const CACHE_TTL_MS = parseInt(process.env.ROAD_SUGGEST_CACHE_TTL_MS || '600000', 10); // 10 daqiqa
-const NEAR_M = parseInt(process.env.ROAD_SUGGEST_NEAR_M || '70', 10); // hudud chetiga yaqinlik
+const NEAR_M = parseInt(process.env.ROAD_SUGGEST_NEAR_M || '100', 10); // hudud chetiga yaqinlik
 const MAX_WAYS = 250;        // Overpass javobidan ko'pi bilan shuncha yo'l
 const MAX_SEGMENTS = 6;      // tavsiya bo'laklari soni
 const MAX_PTS_PER_SEG = 12;  // har bo'lak nuqtalari (payload kichik bo'lsin)
@@ -43,34 +51,38 @@ async function _fetchRoads(bbox) {
     `way["highway"~"^(residential|living_street|service|unclassified|tertiary|secondary|primary|footway|path|pedestrian|cycleway|track|steps)$"]` +
     `(${s},${w},${n},${e});out geom;`;
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': process.env.OVERPASS_USER_AGENT || 'GeoRush/1.0 (territory road suggest)',
-      },
-      body: 'data=' + encodeURIComponent(query),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const roads = [];
-    for (const el of json.elements || []) {
-      if (roads.length >= MAX_WAYS) break;
-      if (el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length >= 2) {
-        roads.push(el.geometry.filter(p => p && typeof p.lon === 'number').map(p => [p.lon, p.lat]));
+  // Mirror'larni navbatma-navbat sinaymiz — biri sekin/xato bo'lsa keyingisi (graceful).
+  for (const url of OVERPASS_ENDPOINTS) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': process.env.OVERPASS_USER_AGENT || 'GeoRush/1.0 (territory road suggest)',
+        },
+        body: 'data=' + encodeURIComponent(query),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      const roads = [];
+      for (const el of json.elements || []) {
+        if (roads.length >= MAX_WAYS) break;
+        if (el.type === 'way' && Array.isArray(el.geometry) && el.geometry.length >= 2) {
+          roads.push(el.geometry.filter(p => p && typeof p.lon === 'number').map(p => [p.lon, p.lat]));
+        }
       }
+      _cache.set(key, { ts: Date.now(), roads });
+      return roads;
+    } catch (_) {
+      // shu mirror sekin/abort/xato — keyingisini sinaymiz
+    } finally {
+      clearTimeout(timer);
     }
-    _cache.set(key, { ts: Date.now(), roads });
-    return roads;
-  } catch (_) {
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
+  return null; // hech bir mirror javob bermadi → chaqiruvchi to'r-fallback'iga o'tadi
 }
 
 // myRings/rivalRings: [ [ [lng,lat],... ], ... ]  (hudud tashqi halqalari)
