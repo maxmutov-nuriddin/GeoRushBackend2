@@ -442,11 +442,12 @@ async function getActivity(req, res, next) {
 
         // Tavsiyalar FAQAT haqiqiy YO'L bo'ylab chiziladi (OSM yo'llaridan hudud chetidagi bo'sh
         // bo'laklar). Eski to'r-katak (katta to'rtburchak, yo'l ustida emas) fallback OLIB TASHLANDI.
-        // maxWaitMs: Overpass tez javob bersa yo'l-tavsiyalar DARHOL chiqadi (≤3s); sekin bo'lsa sahifa
-        // qotmaydi — fonda keshlanadi, keyingi ochishda chiqadi.
+        // MUHIM: Overpass public serveri SEKIN (~20s). Avval 3s kutardik → poyga DOIM yutqazardi,
+        // tavsiyalar HECH QACHON chiqmasdi. Endi noWait — endpoint bloklanmaydi: kesh tayyor bo'lsa
+        // DARHOL qaytaramiz, bo'lmasa fonda isitamiz (≈20s) va frontend bir necha marta qayta so'raydi.
         let gaps = [];
         try {
-          const roadGaps = await suggestRoadGaps(bbox, mine.map((m) => m.polygon), rivals.map((r) => r.polygon), { maxWaitMs: 3000 });
+          const roadGaps = await suggestRoadGaps(bbox, mine.map((m) => m.polygon), rivals.map((r) => r.polygon), { noWait: true });
           if (roadGaps && roadGaps.length) gaps = roadGaps;
         } catch (_) { /* tavsiyasiz */ }
 
