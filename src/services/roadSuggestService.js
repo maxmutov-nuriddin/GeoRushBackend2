@@ -162,4 +162,57 @@ async function suggestRoadGaps(bbox, myRings, rivalRings, opts = {}) {
   });
 }
 
-module.exports = { suggestRoadGaps };
+// GEOMETRIK FALLBACK — Overpass'ga BOG'LIQ EMAS (tarmoq yo'q/sekin/bloklangan bo'lsa ham ishlaydi).
+// Hudud chetidagi (perimetr qirralari) eng katta tomonlardan TASHQARIGA, bo'sh yo'nalishga qarab
+// qisqa "kengayish chiziqlari" qaytaradi. Yo'lga snap qilinmaydi (taxminiy yo'nalish), lekin HAR DOIM
+// nimadir ko'rsatadi → strategik xarita bo'm-bo'sh qolmaydi. myRings/rivalRings: [ [ [lng,lat],... ], ... ].
+// Qaytaradi: [{ line: [[lng,lat],[lng,lat]], fallback: true }, ...].
+function geometricGaps(myRings, rivalRings) {
+  if (!Array.isArray(myRings) || !myRings.length) return [];
+  const REACH_M = 160;   // tashqariga qancha (metr)
+  const START_M = 12;    // qirradan boshlanish ofseti (metr)
+  const MIN_EDGE_M = 12; // juda qisqa qirralarni tashlaymiz
+  const PER_RING = 3;    // bir halqadan ko'pi bilan shuncha yo'nalish
+  const MAX_TOTAL = 6;
+  const out = [];
+  for (const ring of myRings) {
+    if (!ring || ring.length < 4) continue; // yopiq halqa
+    let cx = 0, cy = 0, n = 0;
+    for (const [lng, lat] of ring) { cx += lng; cy += lat; n++; }
+    cx /= n; cy /= n;
+    const mPerLat = 111320, mPerLng = 111320 * Math.cos((cy * Math.PI) / 180) || 1;
+
+    const edges = [];
+    for (let i = 0; i < ring.length - 1; i++) {
+      const a = ring[i], b = ring[i + 1];
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      const dxm = (b[0] - a[0]) * mPerLng, dym = (b[1] - a[1]) * mPerLat;
+      const len = Math.hypot(dxm, dym);
+      if (len < MIN_EDGE_M) continue;
+      // qirra normali (metr fazoda) — markazdan TASHQARIGA yo'naltiramiz
+      let nx = -dym, ny = dxm;
+      if (nx * (mx - cx) * mPerLng + ny * (my - cy) * mPerLat < 0) { nx = -nx; ny = -ny; }
+      const nl = Math.hypot(nx, ny) || 1;
+      edges.push({ mx, my, nx: nx / nl, ny: ny / nl, len });
+    }
+    edges.sort((p, q) => q.len - p.len); // eng uzun (ko'zga ko'rinadigan) tomonlar oldin
+
+    let took = 0;
+    for (const e of edges) {
+      if (took >= PER_RING || out.length >= MAX_TOTAL) break;
+      const elng = e.mx + (e.nx * REACH_M) / mPerLng;
+      const elat = e.my + (e.ny * REACH_M) / mPerLat;
+      // tashqi nuqta BO'SH bo'lsin — o'z hududim yoki rival ichida bo'lmasin
+      if (myRings.some((r) => _pip(elat, elng, r))) continue;
+      if (rivalRings && rivalRings.some((r) => _pip(elat, elng, r))) continue;
+      const slng = e.mx + (e.nx * START_M) / mPerLng;
+      const slat = e.my + (e.ny * START_M) / mPerLat;
+      out.push({ line: [[slng, slat], [elng, elat]], fallback: true });
+      took++;
+    }
+    if (out.length >= MAX_TOTAL) break;
+  }
+  return out;
+}
+
+module.exports = { suggestRoadGaps, geometricGaps };

@@ -5,7 +5,7 @@ const { prisma } = require('../config/database');
 const { getIo } = require('../socket/ioInstance');
 const { tierOf, entitlements } = require('../config/tiers');
 const { getTerritoriesInBounds } = require('../services/territoryService');
-const { suggestRoadGaps } = require('../services/roadSuggestService');
+const { suggestRoadGaps, geometricGaps } = require('../services/roadSuggestService');
 const { escapeHtml } = require('../utils/telegram');
 const { invalidateUserCache } = require('../middleware/auth');
 
@@ -445,13 +445,24 @@ async function getActivity(req, res, next) {
         // MUHIM: Overpass public serveri SEKIN (~20s). Avval 3s kutardik → poyga DOIM yutqazardi,
         // tavsiyalar HECH QACHON chiqmasdi. Endi noWait — endpoint bloklanmaydi: kesh tayyor bo'lsa
         // DARHOL qaytaramiz, bo'lmasa fonda isitamiz (≈20s) va frontend bir necha marta qayta so'raydi.
+        const myRings = mine.map((m) => m.polygon);
+        const rivalRings = rivals.map((r) => r.polygon);
         let gaps = [];
+        let gapsSource = 'geometric';
         try {
-          const roadGaps = await suggestRoadGaps(bbox, mine.map((m) => m.polygon), rivals.map((r) => r.polygon), { noWait: true });
-          if (roadGaps && roadGaps.length) gaps = roadGaps;
-        } catch (_) { /* tavsiyasiz */ }
+          const roadGaps = await suggestRoadGaps(bbox, myRings, rivalRings, { noWait: true });
+          if (roadGaps && roadGaps.length) { gaps = roadGaps; gapsSource = 'road'; }
+        } catch (_) { /* yo'l-tavsiyasiz — geometrikga tushamiz */ }
+
+        // Yo'l-tavsiyalar bo'sh bo'lsa (Overpass cold/sekin/prod'da bloklangan), GEOMETRIK fallback —
+        // tarmoqsiz, hudud chetidan bo'sh tomonga qarab yo'nalish chiziqlari. Strategik xarita HECH QACHON
+        // tavsiyasiz qolmaydi. Kesh isib yo'l-tavsiyalar tayyor bo'lsa, keyingi ochishda ular ustun keladi.
+        if (!gaps.length) {
+          try { gaps = geometricGaps(myRings, rivalRings) || []; } catch (_) { gaps = []; }
+        }
 
         strategic = {
+          gapsSource,
           bbox,
           mine: mine.map((m) => ({ polygon: m.polygon, area: m.area })),
           rivals: rivals.slice(0, 120).map((r) => ({ polygon: r.polygon, area: r.area, color: r.color, username: r.username })),
