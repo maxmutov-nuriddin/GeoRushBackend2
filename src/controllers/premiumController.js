@@ -1,6 +1,7 @@
 const { prisma } = require('../config/database');
 const { sendPremiumInvoice } = require('../bot/otpBot');
 const { tierOf, entitlementsPublic } = require('../config/tiers');
+const logger = require('../utils/logger');
 
 // GET /api/premium/status
 async function getStatus(req, res, next) {
@@ -45,7 +46,20 @@ async function sendInvoice(req, res, next) {
 
     await sendPremiumInvoice(user.telegramChatId, req.user.id, tier, period, promoCode);
     res.json({ ok: true, message: 'Invoice Telegram ga yuborildi' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    // Telegram/bot xatosini umumiy 500 ga "yutib yubormaymiz" — aniq sababni logga yozib,
+    // foydalanuvchiga tushunarli xabar + hint qaytaramiz (diagnostika oson bo'lishi uchun).
+    const tgMsg = err?.response?.body?.description || err?.message || 'Nomaʼlum xato';
+    logger.warn('Premium invoice yuborilmadi:', tgMsg);
+
+    let hint = 'Telegram botini oching va "Start" bosing, soʻng qayta urinib koʻring.';
+    if (/blocked/i.test(tgMsg)) hint = 'Siz botni bloklagansiz. Telegramda botni blокdan chiqaring va qayta urinib koʻring.';
+    else if (/chat not found|initiate/i.test(tgMsg)) hint = 'Bot bilan suhbat boshlanmagan. Telegramda botni oching va "Start" bosing.';
+    else if (/Bot ishlamayapti/i.test(tgMsg)) hint = 'Bot serverda ishga tushmagan (token yoki polling konflikti). Administrator bilan bogʻlaning.';
+    else if (/CURRENCY|amount/i.test(tgMsg)) hint = 'Toʻlov summasi notoʻgʻri sozlangan. Administrator bilan bogʻlaning.';
+
+    return res.status(502).json({ error: 'Toʻlov chiptasini yuborib boʻlmadi', detail: tgMsg, hint });
+  }
 }
 
 module.exports = { getStatus, sendInvoice };
