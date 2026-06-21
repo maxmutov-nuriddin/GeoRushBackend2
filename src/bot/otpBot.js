@@ -511,6 +511,25 @@ async function initBot() {
 
       const incomingPhone = normalizePhone(contact.phone_number);
 
+      // ── Mavjud hisobni DARHOL Telegram'ga bog'laymiz ─────────────────────────
+      // Oqimdan qat'i nazar (register OTP / login / reset / /link): shu raqamli foydalanuvchi
+      // bazada bo'lsa, telegramChatId ni o'rnatamiz. Aks holda telegramChatId faqat /link
+      // (aktiv sessiya YO'Q) holatida yozilardi — natijada ko'p hisob bog'lanmay qolib, Stars
+      // to'lovi 400 ("Telegram bot bilan ulanmagan") berardi. Raqam Telegram tomonidan
+      // tasdiqlangan (yuqorida user_id === from.id), shuning uchun bog'lash xavfsiz.
+      try {
+        const u = await prisma.user.findUnique({
+          where: { phone: incomingPhone },
+          select: { id: true, telegramChatId: true },
+        });
+        if (u && u.telegramChatId !== chatId) {
+          await prisma.user.update({ where: { id: u.id }, data: { telegramChatId: chatId } });
+          logger.info(`telegramChatId bog'landi: userId=${u.id}`);
+        }
+      } catch (err) {
+        logger.warn('telegramChatId bog\'lashda xato:', err.message);
+      }
+
       // Avval OTP sessiyasini topamiz (OTP oqimi)
       let session;
       try {
