@@ -75,8 +75,12 @@ async function _networkFetch(query, key) {
   return null; // hech bir mirror javob bermadi
 }
 
-// opts.noWait: kesh bo'sh bo'lsa tarmoqni KUTMAYMIZ — fonda isitamiz, hozir null qaytaramiz.
-// Shunda profil sahifasi Overpass'ni kutib qotmaydi; keyingi ochishda (10 daq kesh) yo'llar tayyor.
+// Kesh bo'sh bo'lsa:
+//  - opts.maxWaitMs: tarmoqni shu vaqtgacha KUTAMIZ — Overpass tez javob bersa yo'llar DARHOL
+//    chiqadi; sekin bo'lsa sahifa qotmasin uchun null qaytaramiz, lekin tarmoq fonda davom etib
+//    keshlaydi (keyingi ochishda tayyor). Eng yaxshi kelishuv (tez + bloklanmaydi).
+//  - opts.noWait: umuman kutmaymiz (faqat fonda isitamiz).
+//  - hech biri yo'q: to'liq kutamiz (default).
 async function _fetchRoads(bbox, opts = {}) {
   const { swLat: s, swLng: w, neLat: n, neLng: e } = bbox;
   const r = (v) => Math.round(v / 0.001) * 0.001;
@@ -90,14 +94,20 @@ async function _fetchRoads(bbox, opts = {}) {
     `way["highway"~"^(residential|living_street|service|unclassified|tertiary|secondary|primary|footway|path|pedestrian|cycleway|track|steps)$"]` +
     `(${s},${w},${n},${e});out geom;`;
 
-  if (opts.noWait) {
-    if (!_warming.has(key)) {
-      _warming.add(key);
-      _networkFetch(query, key).catch(() => null).finally(() => _warming.delete(key));
-    }
-    return null; // bu safar kutmaymiz — fonda isiydi
+  // Bitta bbox uchun bitta tarmoq so'rovi (takrorni _warming guard oldini oladi).
+  let net = null;
+  if (!_warming.has(key)) {
+    _warming.add(key);
+    net = _networkFetch(query, key).catch(() => null).finally(() => _warming.delete(key));
   }
-  return _networkFetch(query, key);
+
+  if (opts.noWait) return null; // umuman kutmaymiz — fonda isiydi
+  if (opts.maxWaitMs && net) {
+    // Tarmoq vs timeout poygasi — qaysi avval bo'lsa. Timeout yutsa null (net fonda keshlaydi).
+    const winner = await Promise.race([net, new Promise((res) => setTimeout(() => res('__timeout__'), opts.maxWaitMs))]);
+    return winner === '__timeout__' ? null : (winner || null);
+  }
+  return net ? await net : null; // default: to'liq kutish (yoki allaqachon isiyapti → null)
 }
 
 // myRings/rivalRings: [ [ [lng,lat],... ], ... ]  (hudud tashqi halqalari)

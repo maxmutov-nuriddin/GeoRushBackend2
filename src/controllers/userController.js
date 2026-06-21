@@ -441,12 +441,12 @@ async function getActivity(req, res, next) {
         }
 
         // Tavsiyalar FAQAT haqiqiy YO'L bo'ylab chiziladi (OSM yo'llaridan hudud chetidagi bo'sh
-        // bo'laklar). Eski to'r-katak (katta to'rtburchak, yo'l ustida emas) fallback OLIB TASHLANDI —
-        // foydalanuvchi yo'lda bo'lmagan katta blokni xohlamadi. noWait: Overpass'ni KUTMAYMIZ (sahifa
-        // tez ochilsin); kesh bo'sh bo'lsa fonda isiydi, keyingi ochishda yo'l-tavsiyalar chiqadi.
+        // bo'laklar). Eski to'r-katak (katta to'rtburchak, yo'l ustida emas) fallback OLIB TASHLANDI.
+        // maxWaitMs: Overpass tez javob bersa yo'l-tavsiyalar DARHOL chiqadi (≤3s); sekin bo'lsa sahifa
+        // qotmaydi — fonda keshlanadi, keyingi ochishda chiqadi.
         let gaps = [];
         try {
-          const roadGaps = await suggestRoadGaps(bbox, mine.map((m) => m.polygon), rivals.map((r) => r.polygon), { noWait: true });
+          const roadGaps = await suggestRoadGaps(bbox, mine.map((m) => m.polygon), rivals.map((r) => r.polygon), { maxWaitMs: 3000 });
           if (roadGaps && roadGaps.length) gaps = roadGaps;
         } catch (_) { /* tavsiyasiz */ }
 
