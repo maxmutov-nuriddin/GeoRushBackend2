@@ -1,8 +1,6 @@
 const { prisma } = require('../config/database');
 const { Prisma } = require('@prisma/client');
 const polygonClipping = require('polygon-clipping');
-const turfBuffer = require('@turf/buffer').default || require('@turf/buffer');
-const { lineString: turfLineString } = require('@turf/helpers');
 const { polygonAreaM2, geojsonPolygonAreaM2, largestPolygonOf, differenceGeomJS, estimateOverlapFraction, simplifyPolygon, pointInPolygon, segmentsIntersect, haversineDistance } = require('./geoService');
 const { bufferToMulti, closeMerge, TOLERANCE_M, HALF_KM } = require('./territoryMergeBackfill');
 const { maskBuildingsFromPolygon } = require('./buildingMaskService');
@@ -160,35 +158,30 @@ async function differenceTwoGeoms(subjectGeoPolygon, clipGeoPolygon) {
   }
 }
 
-// Yurgan yo'l atrofida radiusM kenglikdagi YO'LAK (buffer) + yopiq halqa ICHINI to'ldirish.
-// Egallash doim yopiq ring bilan keladi (controller [...trail, trail[0]] yopadi). Tasmani yo'l
-// O'RAGAN maydon bilan birlashtiramiz (union) → hudud SOLID (teshiksiz). Borib-kelish (out-and-back)
-// ~0 maydon o'rab oladi → tasma bo'lib qoladi (yurmagan oraliqni belgilashdan himoya saqlanadi);
-// faqat haqiqiy halqalar to'ladi. latlngPoints: [[lat,lng],...]. Natija: { coordinates, area } yoki null.
-function corridorFromPath(latlngPoints, radiusM) {
+// Egallangan hudud = AYNAN yurgan yo'l (chegara = foydalanuvchi chizgan chiziq).
+// Egallash doim yopiq ring bilan keladi (controller [...trail, trail[0]] yopadi → start'ga
+// qaytib yopilgan). Yopiq halqa ICHINI to'ldiramiz (solid), lekin chiziqdan TASHQARIGA
+// hech narsa QO'SHMAYMIZ — buffer/tasma YO'Q. Borib-kelish (out-and-back) ~0 maydon o'rab
+// oladi → min-maydondan o'tmaydi (yurilmagan joyni belgilashdan himoya). polygon-clipping
+// union halqani tozalaydi (o'z-o'zini kesib o'tgan GPS shovqinini valid poligonga keltiradi).
+// latlngPoints: [[lat,lng],...]. Natija: { coordinates, area } yoki null.
+function pathToTerritory(latlngPoints) {
   try {
     const coords = latlngPoints.map(([lat, lng]) => [lng, lat]);
-    if (coords.length < 2) return null;
-    const buffered = turfBuffer(turfLineString(coords), radiusM / 1000, { units: 'kilometers' });
-    const g = buffered && buffered.geometry;
-    // Tasmani MultiPolygon ko'rinishida yig'amiz (polygon-clipping formati).
-    let bandMulti = [];
-    if (g && g.type === 'Polygon' && g.coordinates && g.coordinates[0]) bandMulti = [g.coordinates];
-    else if (g && g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) bandMulti = g.coordinates;
-    if (!bandMulti.length) return null;
+    if (coords.length < 4) return null;
+    const ring = coords.slice();
+    const a = ring[0], b = ring[ring.length - 1];
+    if (a[0] !== b[0] || a[1] !== b[1]) ring.push(a); // yopiq qilamiz
 
-    // Yo'l o'ragan maydonni (yopiq ring) tasmaga QO'SHAMIZ → halqa ichi to'ladi.
-    let resultMulti = bandMulti;
-    if (coords.length >= 4) {
-      const ring = coords.slice();
-      const a = ring[0], b = ring[ring.length - 1];
-      if (a[0] !== b[0] || a[1] !== b[1]) ring.push(a); // yopiq qilamiz
-      try {
-        const polygonClipping = require('polygon-clipping');
-        const unioned = polygonClipping.union(bandMulti, [ring]);
-        if (Array.isArray(unioned) && unioned.length) resultMulti = unioned;
-      } catch (_) { /* union ishlamasa — sof tasma */ }
+    // Yurgan yo'l halqasini SOLID poligonga aylantiramiz (ichi to'ladi). union — o'z-o'zini
+    // kesgan/notekis GPS halqasini valid geometriyaga keltiradi; tashqariga kengaytirmaydi.
+    let resultMulti;
+    try {
+      resultMulti = polygonClipping.union([ring]);
+    } catch (_) {
+      resultMulti = [[ring]];
     }
+    if (!Array.isArray(resultMulti) || !resultMulti.length) resultMulti = [[ring]];
 
     const largest = largestPolygonOf(resultMulti);
     if (!largest || !largest.coordinates || !largest.coordinates[0]) return null;
@@ -235,11 +228,12 @@ async function captureTerritory(userId, rawPoints) {
     throw Object.assign(new Error('Not enough points'), { status: 400, code: 'NOT_ENOUGH_POINTS' });
   }
 
-  // ── YO'LAK (corridor) modeli ──────────────────────────────────────────────
-  // Egallangan hudud = yurgan yo'l atrofidagi CORRIDOR_RADIUS_M kenglikdagi YO'LAK (buffer).
-  // Borib-kelishda (out-and-back) ikki oyoq orasidagi XANJAR EGALLANMAYDI — faqat yurilgan
-  // yo'l. Mukofot yurgan masofaga mutanosib → "yurmagan yerni yurdim" deb belgilashdan himoya.
-  const corridor = corridorFromPath(polygonPoints, constants.CORRIDOR_RADIUS_M);
+  // ── YURGAN YO'L = CHEGARA modeli ───────────────────────────────────────────
+  // Egallangan hudud chegarasi = AYNAN foydalanuvchi yurgan chiziq. Chiziqdan tashqariga
+  // hech narsa qo'shilmaydi (buffer YO'Q), ichkariga qisqarmaydi. Start'ga qaytib halqa
+  // yopilganda — ichidagi to'liq maydon egallanadi (solid). Borib-kelishda (out-and-back)
+  // ~0 maydon → min-maydondan o'tmaydi (yurilmagan joyni belgilashdan himoya).
+  const corridor = pathToTerritory(polygonPoints);
   if (!corridor || !corridor.coordinates || !corridor.coordinates[0]) {
     throw Object.assign(new Error('Not enough points'), { status: 400, code: 'NOT_ENOUGH_POINTS' });
   }
