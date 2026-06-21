@@ -440,57 +440,15 @@ async function getActivity(req, res, next) {
           if (r.centroid && myCentroids.some((mc) => haversine(mc, r.centroid) < 300)) contested++;
         }
 
-        // Nuqta-poligon ichidami (ray casting) — ring [lng,lat] formatida.
-        const pip = (lat, lng, ring) => {
-          let inside = false;
-          for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-            const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
-            if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) inside = !inside;
-          }
-          return inside;
-        };
-        // Katak poligon bilan kesishadimi — markaz ichida YOKI poligon uchi katak ichida.
-        const cellHits = (ring, sLat, sLng, nLat, nLng) => {
-          if (pip((sLat + nLat) / 2, (sLng + nLng) / 2, ring)) return true;
-          for (const [lng, lat] of ring) {
-            if (lat >= sLat && lat <= nLat && lng >= sLng && lng <= nLng) return true;
-          }
-          return false;
-        };
-
-        // Kengayish imkoniyatlari — to'r kataklari POLIGON bilan kesishishига qarab band/bo'sh
-        // (markaz emas) → ✦ hudud ustiga tushmaydi, faqat haqiqatan bo'sh, chegaradagi kataklar.
-        const GRID = 9;
-        const cellLat = (bbox.neLat - bbox.swLat) / GRID;
-        const cellLng = (bbox.neLng - bbox.swLng) / GRID;
-        const rect = (r, c) => ({ swLat: bbox.swLat + r * cellLat, swLng: bbox.swLng + c * cellLng, neLat: bbox.swLat + (r + 1) * cellLat, neLng: bbox.swLng + (c + 1) * cellLng });
-        const occupied = new Set(); const mineCells = new Set();
-        for (let r = 0; r < GRID; r++) {
-          for (let c = 0; c < GRID; c++) {
-            const q = rect(r, c);
-            const mineHit = mine.some((m) => cellHits(m.polygon, q.swLat, q.swLng, q.neLat, q.neLng));
-            const rivalHit = !mineHit && rivals.some((rv) => cellHits(rv.polygon, q.swLat, q.swLng, q.neLat, q.neLng));
-            if (mineHit) mineCells.add(r + ',' + c);
-            if (mineHit || rivalHit) occupied.add(r + ',' + c);
-          }
-        }
-        const gridGaps = [];
-        for (const key of mineCells) {
-          const [r, c] = key.split(',').map(Number);
-          for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-            const nr = r + dr, nc = c + dc, nk = nr + ',' + nc;
-            if (nr < 0 || nc < 0 || nr >= GRID || nc >= GRID || occupied.has(nk) || gridGaps.some((g) => g.key === nk)) continue;
-            gridGaps.push({ key: nk, ...rect(nr, nc) });
-          }
-        }
-
-        // Tavsiyalarni YO'L bo'ylab chizamiz — OSM yo'llaridan hudud chetidagi bo'sh bo'laklar.
-        // Yo'l ma'lumoti bo'lmasa (xato/timeout/bo'sh) — to'r-katak fallback.
-        let gaps = gridGaps.slice(0, 8).map(({ key, ...g }) => g);
+        // Tavsiyalar FAQAT haqiqiy YO'L bo'ylab chiziladi (OSM yo'llaridan hudud chetidagi bo'sh
+        // bo'laklar). Eski to'r-katak (katta to'rtburchak, yo'l ustida emas) fallback OLIB TASHLANDI —
+        // foydalanuvchi yo'lda bo'lmagan katta blokni xohlamadi. noWait: Overpass'ni KUTMAYMIZ (sahifa
+        // tez ochilsin); kesh bo'sh bo'lsa fonda isiydi, keyingi ochishda yo'l-tavsiyalar chiqadi.
+        let gaps = [];
         try {
-          const roadGaps = await suggestRoadGaps(bbox, mine.map((m) => m.polygon), rivals.map((r) => r.polygon));
+          const roadGaps = await suggestRoadGaps(bbox, mine.map((m) => m.polygon), rivals.map((r) => r.polygon), { noWait: true });
           if (roadGaps && roadGaps.length) gaps = roadGaps;
-        } catch (_) { /* fallback: to'r-katak gaps */ }
+        } catch (_) { /* tavsiyasiz */ }
 
         strategic = {
           bbox,
