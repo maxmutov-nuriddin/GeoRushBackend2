@@ -12,7 +12,9 @@
 //  • Qisqa timeout (AbortController) + bbox bo'yicha xotira kesh + bbox/bino soni cheklovlari.
 //  • Yangi npm paket SHART EMAS: global fetch (Node 18+) + mavjud polygon-clipping.
 // ─────────────────────────────────────────────────────────────────────────────
-const { differenceGeomJS } = require('./geoService');
+const { differenceGeomJS, largestPolygonOf, geojsonPolygonAreaM2 } = require('./geoService');
+const turfBuffer = require('@turf/buffer').default || require('@turf/buffer');
+const { polygon: turfPolygon, multiPolygon: turfMultiPolygon } = require('@turf/helpers');
 
 const ENABLED = String(process.env.BUILDING_MASK_ENABLED || 'true').toLowerCase() === 'true';
 const OVERPASS_URL = process.env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter';
@@ -21,6 +23,10 @@ const CACHE_TTL_MS = parseInt(process.env.BUILDING_MASK_CACHE_TTL_MS || '600000'
 const BBOX_PAD_DEG = 0.0008;        // ~80m havo — chekka binolarni ham qamrash uchun
 const MAX_BBOX_DEG = 0.06;          // ~6.5km — juda katta so'rovni rad et (himoya)
 const MAX_BUILDINGS = 600;          // polygon-clipping og'ir bo'lmasligi uchun cheklov
+// Bino ayirilgach hosil bo'lgan o'tkir/ingichka "tirnoq"larni silliqlaydigan radius (metr).
+// Morfologik "close" (shishir +R → qaytar −R): ~2×SMOOTH_M dan TOR tirnoqlar to'ladi,
+// asl katta bino kesimlari va tashqi chegara deyarli o'zgarmaydi. 0 → silliqlash o'chiq.
+const SMOOTH_M = parseFloat(process.env.BUILDING_MASK_SMOOTH_M || '5');
 
 // bbox (yumaloqlangan) bo'yicha oddiy xotira kesh — qisqa muddatli, jarayon umri davomida.
 const _cache = new Map(); // key -> { ts, clips: [GeoJSON Polygon coords...] }
@@ -111,6 +117,31 @@ async function _fetchBuildings(bbox) {
   }
 }
 
+// Morfologik "close" (shishir +R → qaytar −R) — bino ayirilgach hosil bo'lgan o'tkir/ingichka
+// tirnoqlarni TO'LDIRADI (GPS shovqini va uy chetiga tegib o'tish artefaktlari), lekin tashqi
+// chegara va katta bino kesimlarini saqlaydi. Mayda ichki bino teshiklari ham yo'qoladi (toza
+// kontur). HECH QACHON throw qilmaydi — xato/bo'sh natija bo'lsa asl coords'ni qaytaradi.
+function _smoothNotches(coords) {
+  try {
+    if (!(SMOOTH_M > 0) || !Array.isArray(coords) || !coords[0]) return coords;
+    const km = SMOOTH_M / 1000;
+    const feat = turfPolygon(coords);
+    const inflated = turfBuffer(feat, km, { units: 'kilometers' });        // +R: tirnoqlarni to'ldiradi
+    if (!inflated || !inflated.geometry) return coords;
+    const closed = turfBuffer(inflated, -km, { units: 'kilometers' });      // −R: tashqarini asliga qaytaradi
+    if (!closed || !closed.geometry) return coords;
+    let multi;
+    if (closed.geometry.type === 'Polygon') multi = [closed.geometry.coordinates];
+    else if (closed.geometry.type === 'MultiPolygon') multi = closed.geometry.coordinates;
+    else return coords;
+    const largest = largestPolygonOf(multi);
+    if (!largest || !largest.coordinates || !largest.coordinates[0]) return coords;
+    return largest.coordinates;
+  } catch (_) {
+    return coords; // silliqlash xatosi → silliqlanmagan (lekin to'g'ri) kontur
+  }
+}
+
 // Egallangan poligon (GeoJSON Polygon coordinates [[ring],...]) dan binolarni ayiradi.
 // Qaytaradi: { coordinates, area } (niqoblangan) YOKI null (o'zgarish yo'q → chaqiruvchi
 // asl poligondan foydalanadi). HECH QACHON throw qilmaydi.
@@ -131,7 +162,13 @@ async function maskBuildingsFromPolygon(geoPolygonCoords) {
     const diff = differenceGeomJS(geoPolygonCoords, clips);
     if (!diff || !diff.geoPolygon || !diff.geoPolygon.coordinates) return null;
 
-    return { coordinates: diff.geoPolygon.coordinates, area: diff.area };
+    // Bino ayirilgach hosil bo'lgan o'tkir tirnoqlarni silliqlaymiz (yo'lni his qilish saqlanadi,
+    // lekin rasmdagi ingichka kesilishlar yo'qoladi). Silliqlash o'chiq/xato → diff coords'i.
+    const smoothed = _smoothNotches(diff.geoPolygon.coordinates);
+    if (smoothed === diff.geoPolygon.coordinates) {
+      return { coordinates: diff.geoPolygon.coordinates, area: diff.area };
+    }
+    return { coordinates: smoothed, area: geojsonPolygonAreaM2(smoothed) };
   } catch (_) {
     return null; // har qanday kutilmagan xato → asl poligon
   }
