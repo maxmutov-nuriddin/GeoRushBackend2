@@ -404,11 +404,12 @@ async function getActivity(req, res, next) {
       heatPoints = mine.map((m) => (m.centroid ? [m.centroid[0], m.centroid[1], Math.min(1, m.area / 50000)] : null)).filter(Boolean);
 
       if (mine.length) {
-        // Yondosh rivallar tor quticha (bbox)dan tashqarida qolmasligi uchun kengroq padding.
-        // Floor ~0.012° (≈1.3 km): kichik hududli o'yinchida ham yaqin-atrofdagi raqiblar (saqlangan
-        // hudud) strategik xaritaga tushadi. bbox xarita ko'rinishini ham, raqib qidiruvini ham boshqaradi.
-        const padLat = Math.max((maxLat - minLat) * 0.6, 0.012);
-        const padLng = Math.max((maxLng - minLng) * 0.6, 0.012);
+        // Yaqinroq ko'rinish: floor ~0.0045° (≈500 m). Chegarada TEGIB turgan qo'shni rivallar
+        // baribir bbox'ga kiradi (ular mening hududim chetiga ulanган → ST_Intersects ushlaydi),
+        // lekin xarita ko'proq zumlanib, atrof detalliroq ko'rinadi. bbox ham ko'rinishni, ham
+        // raqib qidiruvini boshqaradi.
+        const padLat = Math.max((maxLat - minLat) * 0.35, 0.0045);
+        const padLng = Math.max((maxLng - minLng) * 0.35, 0.0045);
         const bbox = { swLat: minLat - padLat, swLng: minLng - padLng, neLat: maxLat + padLat, neLng: maxLng + padLng };
 
         let inZone = [];
