@@ -4,8 +4,6 @@ const { validationResult } = require('express-validator');
 const { prisma } = require('../config/database');
 const { getIo } = require('../socket/ioInstance');
 const { tierOf, entitlements } = require('../config/tiers');
-const { getTerritoriesInBounds } = require('../services/territoryService');
-const { suggestRoadGaps, geometricGaps } = require('../services/roadSuggestService');
 const { escapeHtml } = require('../utils/telegram');
 const { invalidateUserCache } = require('../middleware/auth');
 
@@ -365,119 +363,9 @@ async function getActivity(req, res, next) {
       windowDays: CAL_DAYS,
     };
 
-    // Strategik xarita — Ultra (heatmap tier). heatPoints eski ilovalar uchun saqlanadi.
-    let heatPoints = [];
-    let strategic = null;
-    if (ent.stats === 'heatmap') {
-      const asGeo = (p) => (typeof p === 'string' ? JSON.parse(p) : p);
-      const centroidOfRing = (ring) => {
-        if (!ring || !ring.length) return null;
-        let lat = 0, lng = 0;
-        for (const c of ring) { lng += c[0]; lat += c[1]; }
-        return [lat / ring.length, lng / ring.length];
-      };
-      const haversine = (a, b) => {
-        const R = 6371000, toR = Math.PI / 180;
-        const dLat = (b[0] - a[0]) * toR, dLng = (b[1] - a[1]) * toR;
-        const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * toR) * Math.cos(b[0] * toR) * Math.sin(dLng / 2) ** 2;
-        return 2 * R * Math.asin(Math.sqrt(s));
-      };
-
-      const myTerrs = await prisma.territory.findMany({
-        where: { ownerId: userId },
-        select: { id: true, polygon: true, area: true },
-        take: 300,
-      });
-
-      const mine = [];
-      let minLat = 90, minLng = 180, maxLat = -90, maxLng = -180;
-      for (const t of myTerrs) {
-        const ring = asGeo(t.polygon)?.coordinates?.[0] || [];
-        if (!ring.length) continue;
-        for (const [lng, lat] of ring) {
-          if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
-          if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng;
-        }
-        mine.push({ polygon: ring, area: t.area || 0, centroid: centroidOfRing(ring) });
-      }
-
-      heatPoints = mine.map((m) => (m.centroid ? [m.centroid[0], m.centroid[1], Math.min(1, m.area / 50000)] : null)).filter(Boolean);
-
-      if (mine.length) {
-        // Yaqinroq ko'rinish: floor ~0.0045° (≈500 m). Chegarada TEGIB turgan qo'shni rivallar
-        // baribir bbox'ga kiradi (ular mening hududim chetiga ulanган → ST_Intersects ushlaydi),
-        // lekin xarita ko'proq zumlanib, atrof detalliroq ko'rinadi. bbox ham ko'rinishni, ham
-        // raqib qidiruvini boshqaradi.
-        const padLat = Math.max((maxLat - minLat) * 0.35, 0.0045);
-        const padLng = Math.max((maxLng - minLng) * 0.35, 0.0045);
-        const bbox = { swLat: minLat - padLat, swLng: minLng - padLng, neLat: maxLat + padLat, neLng: maxLng + padLng };
-
-        let inZone = [];
-        try { inZone = await getTerritoriesInBounds(bbox.swLat, bbox.swLng, bbox.neLat, bbox.neLng); } catch (_) { inZone = []; }
-
-        const rivals = [];
-        const areaByOwner = new Map(); // ownerId -> { username, color, area }
-        for (const t of inZone) {
-          if (String(t.ownerId) === userId) continue;
-          const ring = asGeo(t.polygon)?.coordinates?.[0] || [];
-          if (!ring.length) continue;
-          const color = t.ownerColor || '#ff4444';
-          const username = t.ownerUsername || '?';
-          rivals.push({ polygon: ring, area: t.area || 0, color, username, centroid: centroidOfRing(ring) });
-          const cur = areaByOwner.get(String(t.ownerId)) || { username, color, area: 0 };
-          cur.area += t.area || 0;
-          areaByOwner.set(String(t.ownerId), cur);
-        }
-
-        const myArea = mine.reduce((s, m) => s + m.area, 0);
-        const ownersSorted = [...areaByOwner.values(), { area: myArea, me: true }].sort((a, b) => b.area - a.area);
-        const rankInZone = ownersSorted.findIndex((o) => o.me) + 1;
-        const biggestNeighbor = [...areaByOwner.values()].sort((a, b) => b.area - a.area)[0] || null;
-
-        const myCentroids = mine.map((m) => m.centroid).filter(Boolean);
-        let contested = 0;
-        for (const r of rivals) {
-          if (r.centroid && myCentroids.some((mc) => haversine(mc, r.centroid) < 300)) contested++;
-        }
-
-        // Tavsiyalar FAQAT haqiqiy YO'L bo'ylab chiziladi (OSM yo'llaridan hudud chetidagi bo'sh
-        // bo'laklar). Eski to'r-katak (katta to'rtburchak, yo'l ustida emas) fallback OLIB TASHLANDI.
-        // MUHIM: Overpass public serveri SEKIN (~20s). Avval 3s kutardik → poyga DOIM yutqazardi,
-        // tavsiyalar HECH QACHON chiqmasdi. Endi noWait — endpoint bloklanmaydi: kesh tayyor bo'lsa
-        // DARHOL qaytaramiz, bo'lmasa fonda isitamiz (≈20s) va frontend bir necha marta qayta so'raydi.
-        const myRings = mine.map((m) => m.polygon);
-        const rivalRings = rivals.map((r) => r.polygon);
-        let gaps = [];
-        let gapsSource = 'geometric';
-        try {
-          const roadGaps = await suggestRoadGaps(bbox, myRings, rivalRings, { noWait: true });
-          if (roadGaps && roadGaps.length) { gaps = roadGaps; gapsSource = 'road'; }
-        } catch (_) { /* yo'l-tavsiyasiz — geometrikga tushamiz */ }
-
-        // Yo'l-tavsiyalar bo'sh bo'lsa (Overpass cold/sekin/prod'da bloklangan), GEOMETRIK fallback —
-        // tarmoqsiz, hudud chetidan bo'sh tomonga qarab yo'nalish chiziqlari. Strategik xarita HECH QACHON
-        // tavsiyasiz qolmaydi. Kesh isib yo'l-tavsiyalar tayyor bo'lsa, keyingi ochishda ular ustun keladi.
-        if (!gaps.length) {
-          try { gaps = geometricGaps(myRings, rivalRings) || []; } catch (_) { gaps = []; }
-        }
-
-        strategic = {
-          gapsSource,
-          bbox,
-          mine: mine.map((m) => ({ polygon: m.polygon, area: m.area })),
-          rivals: rivals.slice(0, 120).map((r) => ({ polygon: r.polygon, area: r.area, color: r.color, username: r.username })),
-          gaps,
-          myArea: Math.round(myArea),
-          myCount: mine.length,
-          rankInZone,
-          rivalCount: areaByOwner.size,
-          contested,
-          biggestNeighbor: biggestNeighbor ? { username: biggestNeighbor.username, area: Math.round(biggestNeighbor.area) } : null,
-        };
-      }
-    }
-
-    res.json({ weekly, calendar, summary, heatPoints, strategic, stats: ent.stats });
+    // Xarita (strategik + heatmap) profildan butunlay olib tashlandi — server endi
+    // hudud markazlarini/heatPoints'ni hisoblamaydi (ortiqcha DB ishi yo'q).
+    res.json({ weekly, calendar, summary, stats: ent.stats });
   } catch (err) {
     next(err);
   }
