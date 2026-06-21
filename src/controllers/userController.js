@@ -405,8 +405,10 @@ async function getActivity(req, res, next) {
 
       if (mine.length) {
         // Yondosh rivallar tor quticha (bbox)dan tashqarida qolmasligi uchun kengroq padding.
-        const padLat = Math.max((maxLat - minLat) * 0.5, 0.005);
-        const padLng = Math.max((maxLng - minLng) * 0.5, 0.005);
+        // Floor ~0.012° (≈1.3 km): kichik hududli o'yinchida ham yaqin-atrofdagi raqiblar (saqlangan
+        // hudud) strategik xaritaga tushadi. bbox xarita ko'rinishini ham, raqib qidiruvini ham boshqaradi.
+        const padLat = Math.max((maxLat - minLat) * 0.6, 0.012);
+        const padLng = Math.max((maxLng - minLng) * 0.6, 0.012);
         const bbox = { swLat: minLat - padLat, swLng: minLng - padLng, neLat: maxLat + padLat, neLng: maxLng + padLng };
 
         let inZone = [];
