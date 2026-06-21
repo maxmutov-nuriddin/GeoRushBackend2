@@ -17,7 +17,9 @@ router.get('/status',       getStatus);
 router.post('/send-invoice', [
   body('tier').optional().isIn(['pro', 'ultra']),
   body('period').optional().isIn(['monthly', 'yearly']),
-  body('promoCode').optional().isString().trim().isLength({ max: 40 }),
+  // checkFalsy: promoCode null / '' (promokodsiz to'lov) bo'lsa ham o'tkazamiz — aks holda
+  // .optional() faqat undefined'ni o'tkazib, null'da .isString() 400 berardi (bo'sh promokod = xato).
+  body('promoCode').optional({ checkFalsy: true }).isString().trim().isLength({ max: 40 }),
 ], validate, sendInvoice);
 
 module.exports = router;
