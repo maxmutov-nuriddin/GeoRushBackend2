@@ -234,7 +234,7 @@ async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthl
     chatId,
     `GeoRush ${tier.toUpperCase()} — ${periodLabel}`,
     description,
-    JSON.stringify({ userId, type: PREMIUM_PAYLOAD, tier, period, promoCode }),
+    JSON.stringify({ userId, type: PREMIUM_PAYLOAD, tier, period, promoCode, issuedAt: Date.now() }),
     '',
     'XTR',
     [{ label: `GeoRush Premium ${tier.toUpperCase()} (${periodLabel})`, amount: finalStars }],
@@ -267,6 +267,13 @@ async function handleSuccessfulPayment(msg) {
       });
       if (dup) {
         logger.warn(`Takroriy Stars to'lovi e'tiborsiz qoldirildi: chargeId=${chargeId}, userId=${payload.userId}`);
+        // Foydalanuvchiga bildiramiz — qayta to'lov shart emasligini bilsin (qo'rqib qayta urinmasin).
+        bot.sendMessage(msg.chat.id,
+          'ℹ️ <b>Bu to\'lov allaqachon hisobga olingan</b>\n\n' +
+          'Premium avval shu to\'lov bilan faollashtirilgan — qayta to\'lov shart emas.\n\n' +
+          'Holatni GeoRush ilovasidan tekshirishingiz mumkin.',
+          { parse_mode: 'HTML' }
+        ).catch(() => {});
         return;
       }
     }
@@ -477,9 +484,34 @@ async function initBot() {
       }
     });
 
-    // ── Stars pre-checkout (har doim ruxsat beramiz) ──────────────────────────
+    // ── Stars pre-checkout ────────────────────────────────────────────────────
+    // To'lov TASDIQLANISHIDAN OLDIN keladi — bu yerda rad etsak, foydalanuvchidan pul
+    // UMUMAN yechilmaydi. Eski (30 daqiqadan o'tgan) invoice'ni shu yerda bloklaymiz:
+    // shunda chegirma tugagandan keyin saqlangan eski chegirmali invoice bilan to'lab
+    // bo'lmaydi (chegirma "leak"i yopiladi). issuedAt'siz eski invoice'lar (deploy'dan
+    // oldin yuborilgan) baribir o'tadi — ularning yoshini bilmaymiz, lekin kam va eskirgan.
+    const INVOICE_TTL_MS = 30 * 60 * 1000; // 30 daqiqa
     bot.on('pre_checkout_query', async (query) => {
       try {
+        let payload = null;
+        try { payload = JSON.parse(query.invoice_payload); } catch {}
+        if (payload && payload.issuedAt && (Date.now() - payload.issuedAt) > INVOICE_TTL_MS) {
+          await bot.answerPreCheckoutQuery(query.id, false,
+            'Bu to\'lov havolasi muddati tugagan (30 daqiqa). Ilovadan yangi to\'lov oching.');
+          // Telegram'ning to'lov-banneridan tashqari, chatga ham aniq ogohlantirish + yo'l-yo'riq.
+          if (query.from && query.from.id) {
+            bot.sendMessage(query.from.id,
+              '⏰ <b>To\'lov havolasi eskirgan</b>\n\n' +
+              'Bu to\'lov havolasi 30 daqiqadan ortiq oldin yaratilgan va endi amal qilmaydi ' +
+              '(narx/chegirma o\'zgargan bo\'lishi mumkin).\n\n' +
+              '✅ GeoRush ilovasini oching → <b>Premium</b> → tarifni tanlab <b>yangi to\'lov</b> oching.\n\n' +
+              '💳 Sizdan hech qanday Stars yechilmadi.',
+              { parse_mode: 'HTML' }
+            ).catch(() => {});
+          }
+          logger.info(`Eskirgan invoice rad etildi: userId=${payload.userId}, yosh=${Math.round((Date.now()-payload.issuedAt)/60000)} daqiqa`);
+          return;
+        }
         await bot.answerPreCheckoutQuery(query.id, true);
       } catch (err) {
         logger.error('pre_checkout_query error:', err.message);
