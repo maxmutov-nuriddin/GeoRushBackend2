@@ -1,5 +1,5 @@
 const { prisma } = require('../config/database');
-const { sendPremiumInvoice } = require('../bot/otpBot');
+const { sendPremiumInvoice, sendCoinInvoice, COIN_PACKS } = require('../bot/otpBot');
 const { tierOf, entitlementsPublic } = require('../config/tiers');
 const logger = require('../utils/logger');
 
@@ -62,4 +62,40 @@ async function sendInvoice(req, res, next) {
   }
 }
 
-module.exports = { getStatus, sendInvoice };
+// GET /api/premium/coin-packs — sotuvdagi tanga paketlari (UI ko'rsatishi uchun)
+function coinPacks(req, res) {
+  const packs = Object.entries(COIN_PACKS).map(([id, p]) => ({ id, coins: p.coins, stars: p.stars, bonus: p.bonus || 0 }));
+  res.json({ packs });
+}
+
+// POST /api/premium/send-coin-invoice — tanga paketi uchun Telegram Stars invoice
+async function sendCoinInvoiceHandler(req, res, next) {
+  try {
+    const packId = req.body.packId;
+    if (!packId || !COIN_PACKS[packId]) {
+      return res.status(400).json({ error: 'Noma\'lum tanga paketi', code: 'BAD_PACK' });
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { telegramChatId: true }
+    });
+    if (!user.telegramChatId) {
+      return res.status(400).json({
+        error: 'Telegram bot bilan ulanmagan',
+        hint: 'Bot ichida /link komandasini yuboring va raqamingizni ulashing',
+      });
+    }
+    await sendCoinInvoice(user.telegramChatId, req.user.id, packId);
+    res.json({ ok: true, message: 'Invoice Telegram ga yuborildi' });
+  } catch (err) {
+    const tgMsg = err?.response?.body?.description || err?.message || 'Nomaʼlum xato';
+    logger.warn('Tanga invoice yuborilmadi:', tgMsg);
+    let hint = 'Telegram botini oching va "Start" bosing, soʻng qayta urinib koʻring.';
+    if (/blocked/i.test(tgMsg)) hint = 'Siz botni bloklagansiz. Telegramda botni blokdan chiqaring.';
+    else if (/chat not found|initiate/i.test(tgMsg)) hint = 'Bot bilan suhbat boshlanmagan. Telegramda botni oching va "Start" bosing.';
+    return res.status(502).json({ error: 'Toʻlov chiptasini yuborib boʻlmadi', detail: tgMsg, hint });
+  }
+}
+
+
+module.exports = { getStatus, sendInvoice, coinPacks, sendCoinInvoiceHandler };

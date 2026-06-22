@@ -58,6 +58,24 @@ const TIER_STARS = {
   ultra_yearly: 2500, // yillik Ultra (~799 000 so'm)
 };
 
+// ── Tanga (coins) iqtisodi va paketlari — Telegram Stars bilan sotiladi ──────
+// IQTISOD MUVOZANATI (balans):
+//   KIRIM: welcome +50 · kunlik Free/Pro 15, Ultra 30 · har level 50×coinMult
+//          (Free 50/Pro 75/Ultra 100) · premium welcome Pro 1000, Ultra 2500 (balanslangan)
+//          · referral +200/+100 · tanga paketlari (quyida).
+//   CHIQIM: skinlar 60-1000 (o'rtacha ~320) — shopItems.js.
+//   Free o'yinchi ~450 tanga/oy → o'rtacha skin ~3 hafta, legendary ~2 oy (sog'lom F2P).
+// PAKET ZINAPOYASI: bazaviy 5.0 tanga/⭐; paket kattalashgani sayin qiymat oshadi
+//   (volume bonus) — kattaroq paket olish foydaliroq bo'lsin. bonus% = bazaga nisbatan.
+//   1 Telegram Star ≈ $0.013-0.02 (~50⭐ ≈ $1).
+const COINS_PAYLOAD = 'coins_v1';
+const COIN_PACKS = {
+  pack_s:  { coins: 175,  stars: 35,  bonus: 0  },   // 5.00/⭐  — boshlang'ich (~$0.70)
+  pack_m:  { coins: 450,  stars: 75,  bonus: 20 },   // 6.00/⭐  +20%      (~$1.50)
+  pack_l:  { coins: 1000, stars: 150, bonus: 33 },   // 6.67/⭐  +33%      (~$3.00, legendary skin)
+  pack_xl: { coins: 2200, stars: 300, bonus: 47 },   // 7.33/⭐  +47%      (~$6.00, eng foydali)
+};
+
 let bot = null;
 
 function normalizePhone(phone) {
@@ -241,13 +259,76 @@ async function sendPremiumInvoice(chatId, userId, tier = 'pro', period = 'monthl
   );
 }
 
+// ── Tanga paketi invoice (Telegram Stars) ───────────────────────────────────
+async function sendCoinInvoice(chatId, userId, packId = 'pack_m') {
+  if (!bot) throw new Error('Bot ishlamayapti');
+  const pack = COIN_PACKS[packId];
+  if (!pack) throw new Error('Noma\'lum tanga paketi');
+  await bot.sendInvoice(
+    chatId,
+    `GeoRush — ${pack.coins} tanga`,
+    `🪙 ${pack.coins} tanga hisobingizga qo'shiladi.\nSkinlar, ranglar va boshqa narsalar uchun ishlating.`,
+    JSON.stringify({ userId, type: COINS_PAYLOAD, packId, issuedAt: Date.now() }),
+    '',
+    'XTR',
+    [{ label: `${pack.coins} tanga`, amount: pack.stars }],
+  );
+}
+
+// Tanga to'lovi muvaffaqiyatli — coins'ni qo'shamiz (idempotent: chargeId @unique).
+async function handleCoinPurchase(msg, payload, payment) {
+  const pack = COIN_PACKS[payload.packId];
+  if (!pack) return;
+  const chargeId = payment.telegram_payment_charge_id || null;
+  const paidStars = Number(payment.total_amount) || pack.stars;
+
+  // Idempotency: avval xarid yozuvini yaratamiz. chargeId @unique bo'lgani uchun Telegram
+  // bir xil to'lovni qayta yuborsa create XATO beradi → coins IKKI marta qo'shilmaydi.
+  try {
+    await prisma.premiumPurchase.create({
+      data: {
+        userId: payload.userId, tier: 'coins', period: String(payload.packId),
+        method: 'stars', amountStars: paidStars,
+        chargeId: chargeId ? String(chargeId) : null,
+      },
+    });
+  } catch (e) {
+    if (chargeId) { // unique violation = takroriy to'lov → coins qo'shmaymiz
+      logger.warn(`Takroriy tanga to'lovi e'tiborsiz qoldirildi: chargeId=${chargeId}, userId=${payload.userId}`);
+      bot.sendMessage(msg.chat.id,
+        'ℹ️ <b>Bu to\'lov allaqachon hisobga olingan</b>\n\nTanga avval shu to\'lov bilan qo\'shilgan — qayta to\'lov shart emas.',
+        { parse_mode: 'HTML' }).catch(() => {});
+      return;
+    }
+    logger.error('Tanga xarid yozuvini yaratishda xato:', e);
+    return; // chargeId yo'q va xato → coins qo'shmaymiz (xavfsizlik)
+  }
+
+  // Yozuv yaratildi → tangani qo'shamiz
+  try {
+    const updated = await prisma.user.update({
+      where: { id: payload.userId },
+      data: { coins: { increment: pack.coins } },
+      select: { coins: true },
+    });
+    bot.sendMessage(msg.chat.id,
+      `✅ <b>${pack.coins} tanga qo'shildi!</b>\n\nJoriy balans: <b>${updated.coins}</b> 🪙\n\nSkinlar va ranglar uchun GeoRush ilovasidan ishlating.`,
+      { parse_mode: 'HTML' }).catch(() => {});
+  } catch (e) {
+    logger.error('Tanga qo\'shishda xato (to\'lov yozuvi yaratilgan):', e);
+  }
+}
+
 async function handleSuccessfulPayment(msg) {
   const payment = msg.successful_payment;
   if (!payment) return;
 
   let payload;
   try { payload = JSON.parse(payment.invoice_payload); } catch { return; }
-  if (payload.type !== PREMIUM_PAYLOAD || !payload.userId) return;
+  if (!payload || !payload.userId) return;
+  // Tanga paketi to'lovi — alohida ishlovchiga
+  if (payload.type === COINS_PAYLOAD) return handleCoinPurchase(msg, payload, payment);
+  if (payload.type !== PREMIUM_PAYLOAD) return;
 
   const tier   = payload.tier   || 'pro';
   const period = payload.period || 'monthly';
@@ -658,4 +739,4 @@ async function initBot() {
 
 function getBot() { return bot; }
 
-module.exports = { initBot, getBot, sendPremiumInvoice };
+module.exports = { initBot, getBot, sendPremiumInvoice, sendCoinInvoice, COIN_PACKS };

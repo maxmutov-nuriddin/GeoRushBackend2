@@ -39,7 +39,8 @@ const TIERS = {
     historyDays: 7,
     xpMult: 2,
     coinMult: 1.5,
-    welcomeCoins: 2500,
+    welcomeCoins: 1000,   // 2500→1000 (2026-06-22 balans): boshlang'ich bonus, lekin hammasini
+                          // darhol bermaydi → grind/maqsad qoladi; ongoing 1.5x coinMult+2x XP qiymat beradi
     dailyCoins: 15,
     freeSkins: false,
     badge: 'premium',
@@ -60,7 +61,8 @@ const TIERS = {
     historyDays: Infinity,
     xpMult: 3,
     coinMult: 2,
-    welcomeCoins: 7500,
+    welcomeCoins: 2500,   // 7500→2500 (2026-06-22 balans): avval ~barcha skinni darhol olardi
+                          // (grind yo'q → zerikish); endi legendary+qo'shimcha, ongoing 2x coin+3x XP
     dailyCoins: 30,
     freeSkins: true,
     badge: 'elite',

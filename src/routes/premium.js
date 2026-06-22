@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const { body, validationResult } = require('express-validator');
 const { authenticate } = require('../middleware/auth');
-const { getStatus, sendInvoice } = require('../controllers/premiumController');
+const { getStatus, sendInvoice, coinPacks, sendCoinInvoiceHandler } = require('../controllers/premiumController');
 
 function validate(req, res, next) {
   const errors = validationResult(req);
@@ -21,5 +21,11 @@ router.post('/send-invoice', [
   // .optional() faqat undefined'ni o'tkazib, null'da .isString() 400 berardi (bo'sh promokod = xato).
   body('promoCode').optional({ checkFalsy: true }).isString().trim().isLength({ max: 40 }),
 ], validate, sendInvoice);
+
+// Tanga paketlari (hard currency — Telegram Stars)
+router.get('/coin-packs', coinPacks);
+router.post('/send-coin-invoice', [
+  body('packId').isString().trim().isLength({ max: 40 }),
+], validate, sendCoinInvoiceHandler);
 
 module.exports = router;
