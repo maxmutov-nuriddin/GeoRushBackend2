@@ -26,19 +26,30 @@ const SHOP_ITEMS = [
   { id: 'color_galaxy',   name: 'Galaktika',     name_uz: 'Galaktika',    type: 'color', value: '#7B2FBE', price: 400,  rarity: 'epic' },
   { id: 'color_cyber',    name: 'Kiber',         name_uz: 'Kiber',        type: 'color', value: '#00FF41', price: 400,  rarity: 'epic' },
   { id: 'color_crimson',  name: 'Qizil Olov',    name_uz: 'Qizil Olov',  type: 'color', value: '#DC143C', price: 400,  rarity: 'epic' },
+  { id: 'color_blush',    name: 'Pushti',        name_uz: 'Pushti',       type: 'color', value: '#FFB3C1', price: 140,  rarity: 'uncommon' },
+  { id: 'color_lime',     name: 'Limon',         name_uz: 'Limon',        type: 'color', value: '#AEEA00', price: 140,  rarity: 'uncommon' },
+  { id: 'color_lavender', name: 'Lavanda',       name_uz: 'Lavanda',      type: 'color', value: '#C77DFF', price: 240,  rarity: 'rare' },
+  { id: 'color_bronze',   name: 'Bronza',        name_uz: 'Bronza',       type: 'color', value: '#CD7F32', price: 240,  rarity: 'rare' },
+  { id: 'color_indigo',   name: 'Indigo',        name_uz: 'Indigo',       type: 'color', value: '#3D5AFE', price: 400,  rarity: 'epic' },
   { id: 'color_legend',   name: 'Afsonaviy',     name_uz: 'Afsonaviy',   type: 'color', value: '#F0C040', price: 900,  rarity: 'legendary' },
+  { id: 'color_pearl',    name: 'Marvarid',      name_uz: 'Marvarid',     type: 'color', value: '#F5F5FF', price: 900,  rarity: 'legendary' },
   { id: 'color_spectrum', name: 'Spektr',        name_uz: 'Spektr',       type: 'color', value: '#FF00FF', price: 1000, rarity: 'legendary' },
 
   // ── MARKER USLUBLARI ─────────────────────────────────────────────────────────
-  { id: 'marker_square', name: 'Kvadrat',        name_uz: 'Kvadrat',      type: 'marker', value: 'square', price: 60,   rarity: 'common' },
-  { id: 'marker_hex',    name: 'Oltiburcha',    name_uz: 'Oltiburcha',   type: 'marker', value: 'hex',    price: 140,  rarity: 'uncommon' },
-  { id: 'marker_star',   name: 'Yulduz',          name_uz: 'Yulduz',       type: 'marker', value: 'star',   price: 240,  rarity: 'rare' },
-  { id: 'marker_crown',  name: 'Toj',             name_uz: 'Toj',          type: 'marker', value: 'crown',  price: 400,  rarity: 'epic' },
-  { id: 'marker_diamond',name: 'Olmos',           name_uz: 'Olmos',        type: 'marker', value: 'diamond',price: 900,  rarity: 'legendary' },
+  { id: 'marker_square',  name: 'Kvadrat',        name_uz: 'Kvadrat',      type: 'marker', value: 'square',  price: 60,   rarity: 'common' },
+  { id: 'marker_hex',     name: 'Oltiburcha',    name_uz: 'Oltiburcha',   type: 'marker', value: 'hex',     price: 140,  rarity: 'uncommon' },
+  { id: 'marker_triangle',name: 'Uchburchak',     name_uz: 'Uchburchak',   type: 'marker', value: 'triangle',price: 140,  rarity: 'uncommon' },
+  { id: 'marker_star',    name: 'Yulduz',          name_uz: 'Yulduz',       type: 'marker', value: 'star',    price: 240,  rarity: 'rare' },
+  { id: 'marker_shield',  name: 'Qalqon',          name_uz: 'Qalqon',       type: 'marker', value: 'shield',  price: 240,  rarity: 'rare' },
+  { id: 'marker_crown',   name: 'Toj',             name_uz: 'Toj',          type: 'marker', value: 'crown',   price: 400,  rarity: 'epic' },
+  { id: 'marker_octagon', name: 'Sakkizburchak',   name_uz: 'Sakkizburchak',type: 'marker', value: 'octagon', price: 400,  rarity: 'epic' },
+  { id: 'marker_diamond', name: 'Olmos',           name_uz: 'Olmos',        type: 'marker', value: 'diamond', price: 900,  rarity: 'legendary' },
 
   // ── TRAIL USLUBLARI ──────────────────────────────────────────────────────────
   { id: 'trail_thick',   name: 'Qalin Iz',       name_uz: 'Qalin Iz',    type: 'trail', value: 'thick',   price: 140,  rarity: 'uncommon' },
+  { id: 'trail_dotted',  name: 'Nuqtali Iz',     name_uz: 'Nuqtali Iz',  type: 'trail', value: 'dotted',  price: 140,  rarity: 'uncommon' },
   { id: 'trail_dashed',  name: 'Chiziqli Iz',    name_uz: 'Chiziqli Iz', type: 'trail', value: 'dashed',  price: 240,  rarity: 'rare' },
+  { id: 'trail_bold',    name: 'Dadil Iz',       name_uz: 'Dadil Iz',    type: 'trail', value: 'bold',    price: 240,  rarity: 'rare' },
   { id: 'trail_glow',    name: 'Nurli Iz',        name_uz: 'Nurli Iz',    type: 'trail', value: 'glow',    price: 400,  rarity: 'epic' },
 ];
 
