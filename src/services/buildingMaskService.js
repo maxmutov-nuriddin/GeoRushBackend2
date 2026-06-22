@@ -16,7 +16,10 @@ const { differenceGeomJS, largestPolygonOf, geojsonPolygonAreaM2 } = require('./
 const turfBuffer = require('@turf/buffer').default || require('@turf/buffer');
 const { polygon: turfPolygon, multiPolygon: turfMultiPolygon } = require('@turf/helpers');
 
-const ENABLED = String(process.env.BUILDING_MASK_ENABLED || 'true').toLowerCase() === 'true';
+// Default O'CHIQ (2026-06-22): "yurgan yo'l = chegara, ichi to'liq to'ladi" modeliga ziddir
+// edi — uy atrofidan to'liq yurilsa ham binoni kesib teshik qoldirardi. Egallash endi aynan
+// yurib o'rab olingan SOLID maydon. Qayta yoqish: BUILDING_MASK_ENABLED=true.
+const ENABLED = String(process.env.BUILDING_MASK_ENABLED || 'false').toLowerCase() === 'true';
 const OVERPASS_URL = process.env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter';
 const TIMEOUT_MS = parseInt(process.env.BUILDING_MASK_TIMEOUT_MS || '3500', 10);
 const CACHE_TTL_MS = parseInt(process.env.BUILDING_MASK_CACHE_TTL_MS || '600000', 10); // 10 daqiqa
