@@ -10,9 +10,12 @@ module.exports = {
   TELEPORT_SPEED_MS: 50,            // 50 m/s — imkonsiz harakat (teleport himoyasi)
   MAX_LOCATION_GAP_MS: 30000,       // Uzoq tanaffus chegarasi (30s)
   // Trail faqat tanaffus uzoq BO'LIB, o'sha tanaffusda shuncha metrdan KO'P siljiganда uziladi.
-  // Bir joyda turib pause qilganда (GPS drift <40m) trail SAQLANADI; uzoqqa ketsa (teleport/
+  // Bir joyda turib pause qilganда (GPS drift <60m) trail SAQLANADI; uzoqqa ketsa (teleport/
   // transport) uziladi (anti-cheat). Env: TRAIL_GAP_MIN_DISTANCE_M.
-  TRAIL_GAP_MIN_DISTANCE_M: parseFloat(process.env.TRAIL_GAP_MIN_DISTANCE_M || '40'),
+  // 2026-06-22: 40→60m. Shaharda bir joyda turib pauza qilganda ham GPS 40m+ suzib, trail'ni
+  // noto'g'ri uzar (start siljib LOOP_NOT_CLOSED chiqardi). 60m turgan joydagi suzishni qamrайди,
+  // haqiqiy transport (>60m) baribir uziladi → cheat himoyasi saqlanadi.
+  TRAIL_GAP_MIN_DISTANCE_M: parseFloat(process.env.TRAIL_GAP_MIN_DISTANCE_M || '60'),
   MIN_LOCATION_INTERVAL_MS: 500,    // Ignore updates faster than 500ms
   ANTICHEAT_NEW_ROW_GAP_MS: 120000, // Anti-cheat: shuncha tanaffusdan keyin yangi "incident" qatori (2 daqiqa)
   ANTICHEAT_FLUSH_MS: 15000,        // Anti-cheat: bitta incident count'ini DB'ga yangilash oralig'i (15s)
@@ -24,8 +27,11 @@ module.exports = {
   MIN_TRAIL_POINTS_FOR_POLYGON: 4,
   // Hudud yopilishi uchun oxirgi nuqta boshlang'ich nuqtaga shu masofadan (m) yaqin
   // bo'lishi SHART. Aks holda saqlanmaydi (na auto, na qo'lda). Mijozdagi auto-yopilish
-  // ~20m da ishlaydi — server GPS drift uchun biroz kengroq (30m) chegara qo'yadi.
-  TERRITORY_CLOSE_DISTANCE_M: parseFloat(process.env.TERRITORY_CLOSE_DISTANCE_M || '30'),
+  // ~20m da ishlaydi — server GPS drift uchun biroz kengroq chegara qo'yadi.
+  // 2026-06-22: 30→45m. Shahar GPS aniqligi 26-45m — 30m GPS shovqinidan tor edi, start'da
+  // turib ham "boshlang'ich nuqtaga qayting" (LOOP_NOT_CLOSED) chiqardi. 45m ishonchli yopadi,
+  // cheat'ga yo'l ochmaydi (yo'l baribir yuriladi). Env: TERRITORY_CLOSE_DISTANCE_M.
+  TERRITORY_CLOSE_DISTANCE_M: parseFloat(process.env.TERRITORY_CLOSE_DISTANCE_M || '45'),
 
   // ── Halqa (loop) ↔ chiziq (borib-kelish) ajratish ──────────────────────────
   // Trail kompaktligi (Polsby-Popper: 4π·Area/Perimeter²) shu chegaradan PAST bo'lsa,
