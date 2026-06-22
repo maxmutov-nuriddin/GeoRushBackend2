@@ -1,11 +1,13 @@
 const { prisma } = require('../config/database');
 const { sendPremiumInvoice, sendCoinInvoice, COIN_PACKS } = require('../bot/otpBot');
 const { tierOf, entitlementsPublic } = require('../config/tiers');
+const { applyPendingRollover } = require('../services/premiumRollover');
 const logger = require('../utils/logger');
 
 // GET /api/premium/status
 async function getStatus(req, res, next) {
   try {
+    await applyPendingRollover(req.user.id);
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: { isPremium: true, premiumUntil: true, premiumTier: true, telegramChatId: true, coins: true, createdAt: true }

@@ -2,7 +2,7 @@ const { validationResult } = require('express-validator');
 const { prisma } = require('../config/database');
 const { getIo } = require('../socket/ioInstance');
 const { setPlayerTeam } = require('../socket');
-const { tierOf, entitlements } = require('../config/tiers');
+const { tierOf, entitlements, effectiveTeamMax } = require('../config/tiers');
 
 async function createTeam(req, res, next) {
   try {
@@ -11,12 +11,13 @@ async function createTeam(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { teamId: true, isPremium: true, premiumUntil: true, premiumTier: true }
+      select: { teamId: true, isPremium: true, premiumUntil: true, premiumTier: true, purchasedTeamCreate: true }
     });
     if (user.teamId) return res.status(400).json({ error: 'Leave your current team first' });
 
-    if (!entitlements(tierOf(user)).teamCreate) {
-      return res.status(403).json({ error: 'Jamoa yaratish uchun Pro yoki Ultra kerak', code: 'TEAM_LOCKED' });
+    // Pro/Ultra — tier orqali; Free — coin bilan sotib olgan bo'lsa (purchasedTeamCreate) ruxsat.
+    if (!entitlements(tierOf(user)).teamCreate && !user.purchasedTeamCreate) {
+      return res.status(403).json({ error: 'Jamoa yaratish uchun Pro/Ultra yoki do\'kondan sotib oling', code: 'TEAM_LOCKED' });
     }
 
     const { name, tag, color = '#ff6600', description = '', isPublic = true } = req.body;
@@ -115,15 +116,15 @@ async function joinTeam(req, res, next) {
 
     const owner = await prisma.user.findUnique({
       where: { id: team.ownerId },
-      select: { isPremium: true, premiumUntil: true, premiumTier: true }
+      select: { isPremium: true, premiumUntil: true, premiumTier: true, purchasedTeamCreate: true }
     });
-    
+
     // Atomik a'zolik: maxMembers cheklovi bo'lsa, faqat bo'sh slot qolganda memberCount oshadi.
     // Avval `team.memberCount >= max` ALOHIDA o'qilardi → ikki parallel join bir xil qiymatni
     // o'qib jamoa limitdan oshib ketishi mumkin edi. updateMany WHERE memberCount < max atomik —
     // parallel join'da faqat bo'sh slotlar soni qadar muvaffaqiyat bo'ladi (mantiq o'zgarmaydi:
     // ketma-ket join'da xulq aynan eski — bitta join, bitta slot).
-    const maxMembers = owner ? entitlements(tierOf(owner)).teamMaxMembers : Infinity;
+    const maxMembers = owner ? effectiveTeamMax(owner) : Infinity;
     if (Number.isFinite(maxMembers)) {
       const bumped = await prisma.team.updateMany({
         where: { id: team.id, memberCount: { lt: maxMembers } },
@@ -367,11 +368,11 @@ async function respondToJoinRequest(req, res, next) {
       
       const owner = await prisma.user.findUnique({
         where: { id: team.ownerId },
-        select: { isPremium: true, premiumUntil: true, premiumTier: true }
+        select: { isPremium: true, premiumUntil: true, premiumTier: true, purchasedTeamCreate: true }
       });
-      
+
       // Atomik a'zolik (joinTeam bilan bir xil himoya) — parallel accept'da limit oshmaydi.
-      const maxMembers = owner ? entitlements(tierOf(owner)).teamMaxMembers : Infinity;
+      const maxMembers = owner ? effectiveTeamMax(owner) : Infinity;
       if (Number.isFinite(maxMembers)) {
         const bumped = await prisma.team.updateMany({
           where: { id: team.id, memberCount: { lt: maxMembers } },

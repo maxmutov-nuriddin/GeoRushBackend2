@@ -122,7 +122,7 @@ async function grantPremiumFree(chatId, userId, tier, period, promoCode) {
 
   await prisma.user.update({
     where: { id: userId },
-    data: { isPremium: true, premiumUntil, premiumTier: tier, premiumIsGift: true, coins: { increment: coinsBonus } }
+    data: { isPremium: true, premiumUntil, premiumTier: tier, premiumIsGift: true, coins: { increment: coinsBonus }, expansionsUsed: 0 }
   });
 
   const until = premiumUntil.toLocaleDateString('uz-UZ');
@@ -370,22 +370,38 @@ async function handleSuccessfulPayment(msg) {
     // avval to'lov sanasidan qayta hisoblanib, qolgan kunlar yo'qolardi.
     const existing = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { premiumUntil: true }
+      select: { premiumUntil: true, premiumTier: true, pendingResetAt: true }
     });
-    const base = (existing?.premiumUntil && existing.premiumUntil > new Date())
-      ? existing.premiumUntil.getTime()
-      : Date.now();
+    const stillActive = !!(existing?.premiumUntil && existing.premiumUntil > new Date());
+    const base = stillActive ? existing.premiumUntil.getTime() : Date.now();
     const premiumUntil = new Date(base + days * 24 * 60 * 60 * 1000);
+
+    // KECHIKTIRISH: har qanday premium hali FAOL bo'lsa (uzaytirish YOKI Pro→Ultra upgrade) —
+    // yangi tarif DARAJASI ham, bonuslari ham (coin + kengaytirish reset) DARROV berilmaydi.
+    // Vaqt ustiga qo'shiladi; joriy daraja saqlanadi; pendingResetAt'da yangi daraja ishga tushadi.
+    const isDeferred = stillActive;
 
     await prisma.user.update({
       where: { id: payload.userId },
-      data: {
-        isPremium: true,
-        premiumUntil,
-        premiumTier: tier,
-        premiumIsGift: false, // real to'lov — statistika/daromad hisobida qatnashadi
-        coins: { increment: coinsBonus },
-      }
+      data: isDeferred
+        ? {
+            // Faol — faqat vaqt qo'shiladi. Yangi daraja+bonus joriy muddat tugagach (pendingResetAt).
+            isPremium: true,
+            premiumUntil,
+            // premiumTier O'ZGARMAYDI — joriy daraja eski muddat tugaguncha amal qiladi.
+            pendingTier: tier,
+            pendingResetAt: existing.pendingResetAt || existing.premiumUntil,
+            pendingCoins: { increment: coinsBonus },
+          }
+        : {
+            // Yangi/muddati o'tgan: darhol faollashadi + bonus darrov.
+            isPremium: true,
+            premiumUntil,
+            premiumTier: tier,
+            premiumIsGift: false, // real to'lov — statistika/daromad hisobida qatnashadi
+            coins: { increment: coinsBonus },
+            expansionsUsed: 0,    // yangi davr — kengaytirish budjeti tiklanadi
+          }
     });
 
     // Haqiqiy to'lov ledger'ga — chegirma actual to'langan Stars'dan aniqlanadi
@@ -405,12 +421,21 @@ async function handleSuccessfulPayment(msg) {
     });
 
     const until = premiumUntil.toLocaleDateString('uz-UZ');
+    const sinceStr = isDeferred && existing?.premiumUntil
+      ? existing.premiumUntil.toLocaleDateString('uz-UZ')
+      : null;
+    const curTierStr = (existing?.premiumTier || 'pro').toUpperCase();
     await bot.sendMessage(msg.chat.id,
-      `🎉 GeoRush ${tier.toUpperCase()} faollashtirildi!\n\n` +
-      `⏳ Muddati: ${until} gacha (${periodLabel})\n` +
-      `🛡️ Hudud himoyasi yoqildi\n` +
-      `⚡ ${xpMult} XP yoqildi\n` +
-      `🪙 +${coinsBonus.toLocaleString()} GeoCoins berildi!`
+      isDeferred
+        ? `🎉 GeoRush ${tier.toUpperCase()} sotib olindi!\n\n` +
+          `📅 U joriy ${curTierStr} muddati (${sinceStr}) tugagach ishga tushadi.\n` +
+          `⏳ Umumiy tugash: ${until} gacha (+${periodLabel})\n` +
+          `ℹ️ Bonuslar (+${coinsBonus.toLocaleString()} GeoCoins va kengaytirish budjeti) shu paytda beriladi.`
+        : `🎉 GeoRush ${tier.toUpperCase()} faollashtirildi!\n\n` +
+          `⏳ Muddati: ${until} gacha (${periodLabel})\n` +
+          `🛡️ Hudud himoyasi yoqildi\n` +
+          `⚡ ${xpMult} XP yoqildi\n` +
+          `🪙 +${coinsBonus.toLocaleString()} GeoCoins berildi!`
     );
     logger.info(`Premium activated: userId=${payload.userId}, tier=${tier}, period=${period}, until=${until}`);
   } catch (err) {

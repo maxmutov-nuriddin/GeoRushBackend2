@@ -161,6 +161,14 @@ async function ensureCoreTables() {
     // User — access-token versiyasi (parol tiklash/logout-all'da eski tokenlarni bekor qilish).
     // Mavjud yozuvlar 0 oladi; JWT'dagi `tv` claim shu bilan solishtiriladi.
     `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "tokenVersion" INTEGER NOT NULL DEFAULT 0`,
+    // User — hudud kengaytirish hisobi + coin bilan olingan qo'shimchalar (idempotent, mavjudlar 0 oladi).
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "expansionsUsed" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "purchasedSlots" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "purchasedExpansions" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "purchasedTeamCreate" BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "pendingResetAt" TIMESTAMP(3)`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "pendingCoins" INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "pendingTier" TEXT`,
 
     // ── Support chat (Telegram support-bot + admin panel) ──────────────────────
     // prisma db push ISHLATILMAYDI — jadvallar shu yerda raw SQL bilan yaratiladi.

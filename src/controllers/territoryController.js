@@ -267,6 +267,7 @@ async function captureFromRest(req, res, next) {
       newXp: result.newXp,
       newLevel: result.newLevel,
       stolenFrom: result.stolenFrom,
+      expansion: result.expansion,
     });
 
     // Yon effektlar (invasion/qo'shni pushlar, leaderboard, level-up coin/push) —

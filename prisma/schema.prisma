@@ -25,6 +25,15 @@ model User {
   totalDistance       Float        @default(0)
   territoriesCaptured Int          @default(0)
   territoriesLost     Int          @default(0)
+  // Hudud kengaytirish (merge) hisobi + coin bilan sotib olingan qo'shimchalar.
+  expansionsUsed      Int          @default(0)  // umrbod ishlatilgan kengaytirishlar (hisob bo'yicha jami)
+  purchasedSlots      Int          @default(0)  // coin bilan olingan doimiy qo'shimcha hudud slotlari
+  purchasedExpansions Int          @default(0)  // coin bilan olingan iste'mol kengaytirishlar (limitga qo'shiladi)
+  purchasedTeamCreate Boolean      @default(false) // Free: coin bilan jamoa yaratish huquqi sotib olingan
+  // Faol tarifni qayta olganda (uzaytirish) — bonus DARROV berilmaydi; joriy muddat tugagach ishga tushadi.
+  pendingResetAt      DateTime?    // shu vaqtdan keyin kengaytirish budjeti tiklanadi + pendingCoins beriladi
+  pendingCoins        Int          @default(0) // uzaytirishda kechiktirilgan welcome coinlar (yig'iladi)
+  pendingTier         String?      // kechiktirilgan yangi daraja (Pro→Ultra) — joriy muddat tugagach o'tadi
   lastLocation        Json?        // GeoJSON point or simple object
   lastSeen            DateTime?
   totalPlaytimeSec    Int          @default(0)   // ilovada o'tkazilgan jami vaqt (soniya) — sessiyalar yig'indisi

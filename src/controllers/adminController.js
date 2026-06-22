@@ -261,7 +261,7 @@ async function givePremium(req, res, next) {
       : Date.now();
     const premiumUntil = new Date(base + MS);
 
-    const updateDoc = { isPremium: true, premiumUntil, premiumTier: tier, premiumIsGift: isBonus };
+    const updateDoc = { isPremium: true, premiumUntil, premiumTier: tier, premiumIsGift: isBonus, expansionsUsed: 0 };
     if (welcomeCoins > 0) updateDoc.coins = { increment: welcomeCoins };
 
     const user = await prisma.user.update({

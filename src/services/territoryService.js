@@ -6,6 +6,7 @@ const { bufferToMulti, closeMerge, TOLERANCE_M, HALF_KM } = require('./territory
 const { maskBuildingsFromPolygon } = require('./buildingMaskService');
 const constants = require('../config/constants');
 const { tierOf, entitlements } = require('../config/tiers');
+const { applyPendingRollover } = require('./premiumRollover');
 const logger = require('../utils/logger');
 
 // JS fallback (PostGIS yo'q/xato bo'lganda) — TOLERANTLIK bilan union (backfill bilan izchil).
@@ -261,14 +262,19 @@ async function captureTerritory(userId, rawPoints) {
     throw Object.assign(new Error(`Territory too large (max ${constants.TERRITORY_MAX_AREA_M2 / 1_000_000} km²)`), { status: 400, code: 'AREA_TOO_LARGE' });
   }
 
+  // Kechiktirilgan premium uzaytirish bonusi yetilgan bo'lsa — o'qishdan OLDIN ishga tushiramiz.
+  await applyPendingRollover(userId);
+
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { xp: true, level: true, color: true, teamId: true, isPremium: true, premiumUntil: true, premiumTier: true }
+    select: { xp: true, level: true, color: true, teamId: true, isPremium: true, premiumUntil: true, premiumTier: true,
+              expansionsUsed: true, purchasedSlots: true, purchasedExpansions: true }
   });
   if (!user) throw Object.assign(new Error('User not found'), { status: 404 });
 
-  // Hudud limiti (Free 3 / Pro 15 / Ultra ∞) — tekshiruv quyiroqda: o'z hududlari bilan
-  // BIRLASHADIGAN egallash hudud sonini OSHIRMAYDI, shuning uchun limitга qarshi emas.
+  // Hudud limiti (Free 3 / Pro 10 / Ultra ∞) — tekshiruv quyiroqda: o'z hududlari bilan
+  // BIRLASHADIGAN egallash hudud SONINI oshirmaydi (limitga qarshi emas), lekin alohida
+  // KENGAYTIRISH limitiga kiradi (Free 2 / Pro 7 / Ultra ∞ + sotib olingan).
   const myEnt = entitlements(tierOf(user));
 
   // Yo'lak poligoni (yuqorida qurilgan) — egallash/kesish/overlap shu shakl ustida ishlaydi.
@@ -360,14 +366,28 @@ async function captureTerritory(userId, rawPoints) {
   const finalGeoPolygon = mergeResult ? mergeResult.geoPolygon : workingPolygon;
   const finalArea = mergeResult ? (mergeResult.area || workingArea) : workingArea;
 
-  // Hudud limiti — faqat YANGI (birlashmaydigan) hudud qo'shilganda qo'llanadi.
+  // Hudud SONI limiti — faqat YANGI (birlashmaydigan) hudud. Sotib olingan doimiy slotlar qo'shiladi.
   if (!mergeResult && Number.isFinite(myEnt.territoryLimit)) {
+    const effLimit = myEnt.territoryLimit + (user.purchasedSlots || 0);
     const ownedCount = await prisma.territory.count({ where: { ownerId: userId } });
-    if (ownedCount >= myEnt.territoryLimit) {
-      const err = new Error(`Hudud limiti to'ldi (${myEnt.territoryLimit}). Yangisini egallash uchun eskisini o'chiring.`);
+    if (ownedCount >= effLimit) {
+      const err = new Error(`Hudud limiti to'ldi (${effLimit}). Eskisini o'chiring, Premium oling yoki do'kondan slot soting.`);
       err.status = 403;
       err.code = 'TERRITORY_LIMIT';
-      err.limit = myEnt.territoryLimit;
+      err.limit = effLimit;
+      throw err;
+    }
+  }
+
+  // Hudud KENGAYTIRISH limiti — faqat o'z hududi bilan BIRLASHGANDA (merge). Iste'mol budjeti:
+  // tier (Free 2 / Pro 7) + coin bilan sotib olingan kengaytirishlar. Ultra cheksiz (Infinity → o'tib ketadi).
+  if (mergeResult && Number.isFinite(myEnt.expandLimit)) {
+    const effExpand = myEnt.expandLimit + (user.purchasedExpansions || 0);
+    if ((user.expansionsUsed || 0) >= effExpand) {
+      const err = new Error(`Kengaytirish limiti to'ldi (${effExpand}). Premium oling yoki do'kondan kengaytirish soting.`);
+      err.status = 403;
+      err.code = 'EXPANSION_LIMIT';
+      err.limit = effExpand;
       throw err;
     }
   }
@@ -487,6 +507,8 @@ async function captureTerritory(userId, rawPoints) {
         totalArea: { increment: finalArea - ownAreaSum },
         // O'z zonasini kengaytirish (merge) "yangi hudud" sanalmasin — faqat haqiqatan yangi.
         territoriesCaptured: { increment: ownMergeList.length > 0 ? 0 : 1 },
+        // Kengaytirish (merge) — iste'mol hisobini oshiramiz (limit/sotib olish uchun).
+        expansionsUsed: { increment: ownMergeList.length > 0 ? 1 : 0 },
         xp: { increment: xpGained },
         level: newLevel
       },
@@ -610,6 +632,13 @@ async function captureTerritory(userId, rawPoints) {
     mergedFrom: ownMergeList.map(t => t.id),
     // Qisman kesilib kichraygan (o'chmagan) B zonalar — mijoz darhol yangilashi uchun
     updatedTerritories,
+    // Kengaytirish (merge) holati — mijoz "kam qoldi" ogohlantirishi uchun. remaining=null → cheksiz (Ultra).
+    expansion: {
+      used: ownMergeList.length > 0,
+      remaining: Number.isFinite(myEnt.expandLimit)
+        ? Math.max(0, myEnt.expandLimit + (user.purchasedExpansions || 0) - (user.expansionsUsed || 0) - (ownMergeList.length > 0 ? 1 : 0))
+        : null,
+    },
   };
 }
 
