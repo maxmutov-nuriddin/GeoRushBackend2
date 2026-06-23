@@ -7,6 +7,61 @@ const { getAuditLog } = require('../services/auditLog');
 
 router.use(adminAuth);
 
+const { getRevenueAnalytics } = require('../controllers/adminRevenueController');
+const { getPremiumAnalytics } = require('../controllers/adminPremiumController');
+const { getGrowthAnalytics } = require('../controllers/adminGrowthController');
+const { getReferralAnalytics } = require('../controllers/adminReferralController');
+const { getBusinessAnalytics } = require('../controllers/adminBusinessController');
+
+const { getSystemAnalytics } = require('../controllers/adminSystemController');
+const { getSecurityAnalytics } = require('../controllers/adminSecurityController');
+const { getApiAnalytics } = require('../controllers/adminApiAnalyticsController');
+const { getModerationAnalytics } = require('../controllers/adminModerationController');
+
+const { getQuestAnalytics } = require('../controllers/adminQuestController');
+const { getContentAnalytics } = require('../controllers/adminContentController');
+const { getGeoAnalyticsData } = require('../controllers/adminGeoAnalyticsController');
+const { getRegionsAnalytics } = require('../controllers/adminRegionsController');
+
+const { getMarketingAnalytics } = require('../controllers/adminMarketingController');
+const { getNotificationsAnalytics } = require('../controllers/adminNotificationsController');
+const { getReportsData } = require('../controllers/adminReportsController');
+const { getExportData } = require('../controllers/adminExportController');
+const { getInvestorDashboard } = require('../controllers/adminInvestorController');
+const { getExperimentsData } = require('../controllers/adminExperimentsController');
+const { getDevicesAnalytics } = require('../controllers/adminDevicesController');
+
+
+// ─── Phase 1: Revenue & Premium & Growth & Business ──────────────────────────
+router.get('/revenue',                 getRevenueAnalytics);
+router.get('/premium',                 getPremiumAnalytics);
+router.get('/growth',                  getGrowthAnalytics);
+router.get('/referrals',               getReferralAnalytics);
+router.get('/business',                getBusinessAnalytics);
+
+
+// ─── Phase 2: System, Security, ApiAnalytics, Moderation ───────────────────────
+router.get('/system',                  getSystemAnalytics);
+router.get('/security',                getSecurityAnalytics);
+router.get('/api-analytics',           getApiAnalytics);
+router.get('/moderation-analytics',    getModerationAnalytics);
+
+// ─── Phase 3: Quests, Content, Geo, Regions ────────────────────────────────────
+router.get('/quest-analytics',         getQuestAnalytics);
+router.get('/content',                 getContentAnalytics);
+router.get('/geo-analytics',           getGeoAnalyticsData);
+router.get('/regions',                 getRegionsAnalytics);
+
+// ─── Phase 4: Marketing, Notifications, Reports, Export, Investor, Experiments, Devices
+router.get('/marketing',               getMarketingAnalytics);
+router.get('/notifications-analytics', getNotificationsAnalytics);
+router.get('/reports',                 getReportsData);
+router.get('/export',                  getExportData);
+router.get('/investor',                getInvestorDashboard);
+router.get('/experiments',             getExperimentsData);
+router.get('/devices',                 getDevicesAnalytics);
+
+
 // ─── Insights (read-only analitika — yangi) ─────────────────────────────────────
 router.get('/insights/geo',            ins.getGeoDistribution);
 router.get('/insights/revenue',        ins.getRevenueBreakdown);
