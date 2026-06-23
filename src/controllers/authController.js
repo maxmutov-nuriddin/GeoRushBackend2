@@ -93,6 +93,7 @@ function serializeUser(u) {
     termsAccepted: u.termsAccepted || false,
     isAdmin: u.isAdmin || false,
     coins:        u.coins || 0,
+    createdAt:    u.createdAt || null,
     activeSkins: {
       color:  u.activeSkinColor  || null,
       marker: u.activeSkinMarker || null,
