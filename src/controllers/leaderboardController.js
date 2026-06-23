@@ -48,21 +48,28 @@ async function getPlayerLeaderboard(req, res, next) {
     });
 
     const now = new Date();
-    const leaderboard = players.map((p, i) => ({
-      id: p.id,
-      username: p.username,
-      color: p.color,
-      xp: p.xp,
-      level: p.level,
-      totalArea: p.totalArea,
-      territoriesCaptured: p.territoriesCaptured,
-      isOnline: p.isOnline,
-      isPremium: !!(p.isPremium && p.premiumUntil && now < new Date(p.premiumUntil)),
-      teamName: p.team?.name,
-      teamColor: p.team?.color,
-      teamTag: p.team?.tag,
-      rank: i + 1,
-    }));
+    const leaderboard = players.map((p, i) => {
+      const isActivePremium = !!(p.isPremium && p.premiumUntil && now < new Date(p.premiumUntil));
+      const tier = isActivePremium ? (p.premiumTier || 'pro') : 'free';
+      return {
+        id: p.id,
+        username: p.username,
+        color: p.color,
+        xp: p.xp,
+        level: p.level,
+        totalArea: p.totalArea,
+        territoriesCaptured: p.territoriesCaptured,
+        isOnline: p.isOnline,
+        isPremium: isActivePremium,
+        premiumTier: tier,
+        teamName: p.team?.name,
+        teamColor: p.team?.color,
+        teamTag: p.team?.tag,
+        city: (tier === 'pro' || tier === 'ultra') ? (p.city || null) : null,
+        country: tier === 'ultra' ? (p.country || null) : null,
+        rank: i + 1,
+      };
+    });
 
     if (scope === 'global' && limit === 50) {
       cache.players = { data: leaderboard, at: Date.now() };
