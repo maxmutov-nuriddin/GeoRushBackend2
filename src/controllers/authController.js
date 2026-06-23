@@ -94,7 +94,6 @@ function serializeUser(u) {
     isAdmin: u.isAdmin || false,
     coins:        u.coins || 0,
     createdAt:    u.createdAt || null,
-    activeDays:   u.activeDays || 1,
     activeSkins: {
       color:  u.activeSkinColor  || null,
       marker: u.activeSkinMarker || null,

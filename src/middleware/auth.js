@@ -65,7 +65,6 @@ const USER_SELECT = {
   isOnline: true, expoPushToken: true, termsAccepted: true, isAdmin: true, isBanned: true,
   coins: true, ownedSkins: true, activeSkinColor: true, activeSkinMarker: true, activeSkinTrail: true,
   isPremium: true, premiumUntil: true, premiumTier: true,
-  createdAt: true, activeDays: true,
   tokenVersion: true,
 };
 
