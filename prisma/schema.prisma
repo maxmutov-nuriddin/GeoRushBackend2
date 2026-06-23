@@ -36,6 +36,8 @@ model User {
   pendingTier         String?      // kechiktirilgan yangi daraja (Pro→Ultra) — joriy muddat tugagach o'tadi
   lastLocation        Json?        // GeoJSON point or simple object
   lastSeen            DateTime?
+  activeDays          Int          @default(1)
+  lastActiveDay       DateTime?
   totalPlaytimeSec    Int          @default(0)   // ilovada o'tkazilgan jami vaqt (soniya) — sessiyalar yig'indisi
   sessionCount        Int          @default(0)   // tugagan sessiyalar soni (o'rtacha = totalPlaytimeSec / sessionCount)
   city                String?

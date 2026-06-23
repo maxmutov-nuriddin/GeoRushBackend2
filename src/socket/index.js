@@ -103,6 +103,7 @@ function initializeSocket(io) {
           isPremium: true,
           premiumUntil: true,
           premiumTier: true,
+          lastActiveDay: true,
         }
       });
       if (user?.isBanned) {
@@ -130,9 +131,20 @@ function initializeSocket(io) {
           tier:       tierOf(user),
         });
 
+        const now = new Date();
+        const updateData = { isOnline: true, socketId: socket.id, lastSeen: now };
+        
+        const todayStr = now.toISOString().split('T')[0];
+        const lastActiveStr = user.lastActiveDay ? new Date(user.lastActiveDay).toISOString().split('T')[0] : null;
+        
+        if (todayStr !== lastActiveStr) {
+          updateData.activeDays = { increment: 1 };
+          updateData.lastActiveDay = now;
+        }
+
         await prisma.user.update({
           where: { id: userId },
-          data: { isOnline: true, socketId: socket.id, lastSeen: new Date() },
+          data: updateData,
         });
         socket.data.connectedAt = Date.now(); // sessiya boshlanishi — disconnect'da davomiylik hisoblanadi
 
