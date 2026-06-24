@@ -549,11 +549,19 @@ async function searchUsers(req, res, next) {
         isAdmin: false,
         isBanned: false,
       },
-      select: { id: true, username: true, color: true, level: true },
+      select: { id: true, username: true, color: true, level: true, isPremium: true, premiumUntil: true, premiumTier: true },
       take: 10,
     });
 
-    res.json({ users: users.map(u => ({ ...u, _id: u.id })) });
+    const now = new Date();
+    res.json({ 
+      users: users.map(u => ({ 
+        ...u, 
+        _id: u.id,
+        isPremium: !!(u.isPremium && u.premiumUntil && now < new Date(u.premiumUntil)),
+        tier: tierOf(u)
+      })) 
+    });
   } catch (err) {
     next(err);
   }
