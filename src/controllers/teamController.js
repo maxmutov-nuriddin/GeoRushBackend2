@@ -63,13 +63,14 @@ async function getTeam(req, res, next) {
     const now = new Date();
     const members = await prisma.user.findMany({
       where: { teamId: team.id },
-      select: { id: true, username: true, color: true, xp: true, level: true, totalArea: true, isPremium: true, premiumUntil: true },
+      select: { id: true, username: true, color: true, xp: true, level: true, totalArea: true, isPremium: true, premiumUntil: true, premiumTier: true },
       orderBy: { xp: 'desc' }
     });
 
     const membersWithPremium = members.map(m => ({
       ...m,
       isPremium: !!(m.isPremium && m.premiumUntil && now < new Date(m.premiumUntil)),
+      tier: tierOf(m)
     }));
 
     res.json({

@@ -1,12 +1,23 @@
 const { prisma } = require('../config/database');
 const { sendExpoPush } = require('../services/captureEffects');
 const logger = require('../utils/logger');
+const { tierOf } = require('../config/tiers');
 
 // Boshqa foydalanuvchiga ko'rinadigan PUBLIC maydonlar (profil privacy bilan bir xil siyosat)
 const PUBLIC_USER_SELECT = {
   id: true, username: true, color: true, level: true, xp: true,
-  totalArea: true, isOnline: true,
+  totalArea: true, isOnline: true, isPremium: true, premiumUntil: true, premiumTier: true,
 };
+
+function mapPublicUser(u) {
+  if (!u) return u;
+  const now = new Date();
+  return {
+    ...u,
+    isPremium: !!(u.isPremium && u.premiumUntil && now < new Date(u.premiumUntil)),
+    tier: tierOf(u),
+  };
+}
 
 // Ikki user orasidagi yozuvni (yo'nalishidan qat'i nazar) topish
 function pairWhere(a, b) {
@@ -49,7 +60,7 @@ async function listFriends(req, res, next) {
       const other = r.requesterId === me ? r.addressee : r.requester;
       if (seen.has(other.id)) continue;
       seen.add(other.id);
-      friends.push({ friendshipId: r.id, since: r.updatedAt, ...other });
+      friends.push({ friendshipId: r.id, since: r.updatedAt, ...mapPublicUser(other) });
     }
     res.json({ friends });
   } catch (err) { next(err); }
@@ -72,8 +83,8 @@ async function listRequests(req, res, next) {
       }),
     ]);
     res.json({
-      incoming: incomingRows.map((r) => ({ requestId: r.id, createdAt: r.createdAt, ...r.requester })),
-      outgoing: outgoingRows.map((r) => ({ requestId: r.id, createdAt: r.createdAt, ...r.addressee })),
+      incoming: incomingRows.map((r) => ({ requestId: r.id, createdAt: r.createdAt, ...mapPublicUser(r.requester) })),
+      outgoing: outgoingRows.map((r) => ({ requestId: r.id, createdAt: r.createdAt, ...mapPublicUser(r.addressee) })),
     });
   } catch (err) { next(err); }
 }
@@ -116,7 +127,7 @@ async function searchUsers(req, res, next) {
     }
 
     res.json({
-      users: users.map((u) => ({ ...u, friendStatus: statusOf.get(u.id) || 'none' })),
+      users: users.map((u) => ({ ...mapPublicUser(u), friendStatus: statusOf.get(u.id) || 'none' })),
     });
   } catch (err) { next(err); }
 }
