@@ -463,4 +463,33 @@ async function sendPublicSupport(req, res, next) {
   }
 }
 
-module.exports = { getProfile, updateProfile, changePassword, getOnlinePlayers, clearMyData, deleteAccount, savePushToken, acceptTerms, setLocationMeta, getActivity, sendSupport, sendPublicSupport };
+async function getNotifications(req, res, next) {
+  try {
+    const notifs = await prisma.notification.findMany({
+      where: { userId: req.user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 20
+    });
+    res.json({ notifications: notifs });
+  } catch (err) { next(err); }
+}
+
+async function markNotificationsRead(req, res, next) {
+  try {
+    const { ids } = req.body;
+    if (ids && ids.length > 0) {
+      await prisma.notification.updateMany({
+        where: { id: { in: ids }, userId: req.user.id },
+        data: { isRead: true }
+      });
+    } else {
+      await prisma.notification.updateMany({
+        where: { userId: req.user.id, isRead: false },
+        data: { isRead: true }
+      });
+    }
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+module.exports = { getProfile, updateProfile, changePassword, getOnlinePlayers, clearMyData, deleteAccount, savePushToken, acceptTerms, setLocationMeta, getActivity, sendSupport, sendPublicSupport, getNotifications, markNotificationsRead };

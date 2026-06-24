@@ -18,15 +18,17 @@ const logger = require('../utils/logger');
 
 const expo = new Expo();
 const DAY = 24 * 60 * 60 * 1000;
-const SEGMENTS = ['all', 'premium', 'active', 'country'];
+const SEGMENTS = ['all', 'premium', 'active', 'country', 'single'];
 
 // Segment → Prisma where filtri. Hammasi push token bor + ban bo'lmaganlar bilan cheklanadi.
-function buildWhere(segment, country) {
-  const base = { isAdmin: false, isBanned: false, expoPushToken: { not: null } };
+// Segment → Prisma where filtri. Ban bo'lmaganlar.
+function buildWhere(segment, country, targetUser) {
+  const base = { isAdmin: false, isBanned: false };
   switch (segment) {
     case 'premium': return { ...base, isPremium: true };
     case 'active':  return { ...base, lastSeen: { gte: new Date(Date.now() - 7 * DAY) } };
     case 'country': return { ...base, country };
+    case 'single':  return { ...base, username: targetUser };
     case 'all':
     default:        return base;
   }
@@ -34,13 +36,16 @@ function buildWhere(segment, country) {
 
 async function sendBroadcast(req, res, next) {
   try {
-    const { segment = 'all', title, body, country, dryRun } = req.body;
+    const { segment = 'all', title, body, country, targetUser, dryRun } = req.body;
 
     if (!SEGMENTS.includes(segment)) {
       return res.status(400).json({ error: `segment noto'g'ri (${SEGMENTS.join(', ')})` });
     }
     if (segment === 'country' && (!country || !String(country).trim())) {
       return res.status(400).json({ error: "segment='country' uchun 'country' majburiy" });
+    }
+    if (segment === 'single' && (!targetUser || !String(targetUser).trim())) {
+      return res.status(400).json({ error: "segment='single' uchun username majburiy" });
     }
     const t = String(title || '').trim();
     const b = String(body || '').trim();
@@ -49,8 +54,8 @@ async function sendBroadcast(req, res, next) {
       return res.status(400).json({ error: 'title ≤100, body ≤240 belgi bo\'lishi kerak' });
     }
 
-    const where = buildWhere(segment, country && String(country).trim());
-    const users = await prisma.user.findMany({ where, select: { expoPushToken: true } });
+    const where = buildWhere(segment, country && String(country).trim(), targetUser && String(targetUser).trim());
+    const users = await prisma.user.findMany({ where, select: { id: true, expoPushToken: true } });
 
     // Faqat HAQIQIY Expo tokenlar
     const tokens = users
@@ -60,6 +65,12 @@ async function sendBroadcast(req, res, next) {
     // dryRun — yubormay, faqat nechta odamga borishini qaytaramiz
     if (dryRun) {
       return res.json({ dryRun: true, segment, recipients: tokens.length, matchedUsers: users.length });
+    }
+
+    // In-app Notification larni saqlash
+    if (users.length > 0) {
+      const notifs = users.map(u => ({ userId: u.id, title: t, body: b }));
+      await prisma.notification.createMany({ data: notifs });
     }
 
     // Haqiqiy yuborish — chunk'larga bo'lib

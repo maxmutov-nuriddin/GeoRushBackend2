@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { body } = require('express-validator');
-const { getProfile, updateProfile, changePassword, getOnlinePlayers, clearMyData, deleteAccount, savePushToken, acceptTerms, setLocationMeta, getActivity, sendSupport, sendPublicSupport } = require('../controllers/userController');
+const { getProfile, updateProfile, changePassword, getOnlinePlayers, clearMyData, deleteAccount, savePushToken, acceptTerms, setLocationMeta, getActivity, sendSupport, sendPublicSupport, getNotifications, markNotificationsRead } = require('../controllers/userController');
 const { authenticate } = require('../middleware/auth');
 const { contactLimiter } = require('../middleware/rateLimiter');
 
@@ -21,6 +21,8 @@ router.post('/me/support', authenticate, [
   body('telegramUsername').optional().trim().isLength({ max: 50 }),
 ], sendSupport);
 router.post('/me/push-token', authenticate, savePushToken);
+router.get('/me/notifications', authenticate, getNotifications);
+router.post('/me/notifications/read', authenticate, markNotificationsRead);
 router.post('/me/location-meta', authenticate, setLocationMeta);
 router.post('/me/clear-data', authenticate, clearMyData);
 router.delete('/me', authenticate, [

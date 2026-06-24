@@ -85,6 +85,7 @@ model User {
   friendRequestsReceived Friendship[] @relation("FriendRequestsReceived")
   referralsMade          Referral[]   @relation("ReferralsMade")
   referralReceived       Referral?    @relation("ReferralReceived")
+  notifications          Notification[] @relation("UserNotifications")
 }
 
 model RefreshToken {
@@ -334,4 +335,21 @@ model SupportMessage {
   createdAt    DateTime     @default(now())
 
   @@index([chatId, createdAt])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+}
+
+model SystemFlag {
+  key       String   @id
+  createdAt DateTime @default(now())
 }
