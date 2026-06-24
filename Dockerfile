@@ -21,5 +21,5 @@ COPY . .
 # Portni ochish
 EXPOSE 5000
 
-# Dasturni ishga tushirish
-CMD ["npm", "start"]
+# Dasturni ishga tushirish (Avval bazani yangilaydi, keyin serverni yoqadi)
+CMD ["sh", "-c", "npx prisma db push && npm start"]
