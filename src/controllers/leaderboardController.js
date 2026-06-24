@@ -58,6 +58,7 @@ async function getPlayerLeaderboard(req, res, next) {
       territoriesCaptured: p.territoriesCaptured,
       isOnline: p.isOnline,
       isPremium: !!(p.isPremium && p.premiumUntil && now < new Date(p.premiumUntil)),
+      tier: tierOf(p),
       teamName: p.team?.name,
       teamColor: p.team?.color,
       teamTag: p.team?.tag,
