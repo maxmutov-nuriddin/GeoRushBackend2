@@ -22,4 +22,4 @@ COPY . .
 EXPOSE 5000
 
 # Dasturni ishga tushirish (Avval bazani yangilaydi, keyin serverni yoqadi)
-CMD ["sh", "-c", "npx prisma db push && npm start"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && npm start"]
