@@ -23,7 +23,7 @@ module.exports = {
   // Territory rules
   TERRITORY_MIN_AREA_M2: 50,        // Minimum 50 m²
   TERRITORY_MAX_AREA_M2: 15_000_000, // Max 15 km²
-  MAX_TRAIL_POINTS: parseInt(process.env.MAX_TRAIL_POINTS || '5000'),
+  MAX_TRAIL_POINTS: parseInt(process.env.MAX_TRAIL_POINTS || '10000'), // shift/ceiling = eng katta tarif (Ultra); har user capture'da o'z pathLimit'iга kesiladi
   MIN_TRAIL_POINTS_FOR_POLYGON: 4,
   // Hudud yopilishi uchun oxirgi nuqta boshlang'ich nuqtaga shu masofadan (m) yaqin
   // bo'lishi SHART. Aks holda saqlanmaydi (na auto, na qo'lda). Mijozdagi auto-yopilish

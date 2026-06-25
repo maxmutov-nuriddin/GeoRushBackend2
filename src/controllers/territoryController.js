@@ -211,6 +211,19 @@ async function captureFromRest(req, res, next) {
       }
     }
 
+    // ── Tarif bo'yicha yo'l limiti (Free 2000 / Pro 6000 / Ultra 10000) ──────────
+    // Server-trail shift = MAX_TRAIL_POINTS (Ultra ceiling); shu yerda foydalanuvchini
+    // O'Z tarifiga qarab kesamiz. trail[0] (start) saqlanadi — halqa yopilishi uchun kerak
+    // (trailStore semantikasi bilan bir xil: o'rtadagi eski nuqtalar tushadi).
+    const capUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isPremium: true, premiumUntil: true, premiumTier: true },
+    });
+    const pathLimit = entitlements(tierOf(capUser)).pathLimit || 2000;
+    if (trail.length > pathLimit) {
+      trail = [trail[0], ...trail.slice(trail.length - (pathLimit - 1))];
+    }
+
     const polygon = [...trail, trail[0]];
 
     const result = await captureTerritory(userId, polygon);

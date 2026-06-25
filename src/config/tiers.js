@@ -8,6 +8,7 @@ const TIERS = {
     teamCreate: false,
     teamMaxMembers: 0,        // o'zi jamoa egasi bo'la olmaydi
     territoryLimit: 3,
+    pathLimit: 2000,          // bitta startда saqlanadigan yo'l nuqtalari (rolling buffer); ~30km perimetr
     expandLimit: 5,           // hisob bo'yicha jami kengaytirish (merge) soni; coin bilan oshiriladi (2026-06-22: 2→5 jalb uchun)
     maxPurchasedSlots: 1,     // coin bilan olinadigan qo'shimcha hudud slotlari chegarasi
     shieldMargin: null,       // null = himoya yo'q
@@ -31,6 +32,7 @@ const TIERS = {
     teamCreate: true,
     teamMaxMembers: 4,        // ega + 3 qo'shiladi
     territoryLimit: 10,       // 15→10 (2026-06-22 balans): tiniqroq zinapoya 3→10→∞, Ultra qiymati oshadi
+    pathLimit: 6000,          // bitta startда saqlanadigan yo'l nuqtalari (~90km perimetr); Free'ning 3×
     expandLimit: 15,          // hisob bo'yicha jami kengaytirish; coin bilan oshiriladi (2026-06-22: 7→15, Free'ning 3×)
     maxPurchasedSlots: 2,     // coin bilan olinadigan qo'shimcha hudud slotlari chegarasi
     shieldMargin: 5,          // attacker.level < owner.level - 5 bo'lsa himoyalanadi
@@ -55,6 +57,7 @@ const TIERS = {
     teamCreate: true,
     teamMaxMembers: Infinity,
     territoryLimit: Infinity,
+    pathLimit: 10000,         // bitta startда saqlanadigan yo'l nuqtalari (~150km perimetr); render xavfsiz zonada
     expandLimit: Infinity,    // Ultra — cheksiz kengaytirish
     maxPurchasedSlots: 0,     // Ultra allaqachon cheksiz — slot sotib olish kerak emas
     shieldMargin: 0,          // qat'iy: pastdagilar umuman ololmaydi
