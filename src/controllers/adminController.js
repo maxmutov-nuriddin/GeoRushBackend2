@@ -595,6 +595,17 @@ async function addWarning(req, res, next) {
     if (severity === 'high' && count >= 3) {
       await prisma.user.update({ where: { id: req.params.id }, data: { isBanned: true } });
     }
+
+    // Foydalanuvchiga real-time yetkazamiz — bosh sahifadagi bildirishnoma markazida
+    // sababi bilan ko'rinadi (admin'dan ekani bilinadi). Online bo'lsa darhol, online
+    // bo'lmasa keyingi kirишida warnings'дан ko'rsатилади (Dashboard yuklayди).
+    const io = req.app.get('io');
+    io?.to(`user:${req.params.id}`).emit('admin:warning', {
+      reason: warning.reason,
+      severity: warning.severity,
+      createdAt: warning.createdAt,
+    });
+
     res.json({ warning: { ...warning, _id: warning.id }, totalWarnings: count });
   } catch (err) { next(err); }
 }
