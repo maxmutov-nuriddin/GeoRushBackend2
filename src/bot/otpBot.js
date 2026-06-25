@@ -104,7 +104,7 @@ function calculateSomPrice(tier, period, discountPct = 0) {
 async function grantPremiumFree(chatId, userId, tier, period, promoCode) {
   const days = PREMIUM_DAYS[period] || 30;
   const coinsBonus = (TIERS[tier] || TIERS.pro).welcomeCoins;
-  const xpMult = tier === 'ultra' ? '3x' : '2x';
+  const xpMult = tier === 'ultra' ? '1.5x' : '1.25x';
   const periodLabel = period === 'yearly' ? '12 oy (365 kun)' : '30 kun';
 
   if (promoCode) {
@@ -335,7 +335,7 @@ async function handleSuccessfulPayment(msg) {
   const days   = PREMIUM_DAYS[period] || 30;
   const promoCode = payload.promoCode;
   const coinsBonus = (TIERS[tier] || TIERS.pro).welcomeCoins;
-  const xpMult     = tier === 'ultra' ? '3x' : '2x';
+  const xpMult = tier === 'ultra' ? '1.5x' : '1.25x';
   const periodLabel = period === 'yearly' ? '12 oy (365 kun)' : '30 kun';
 
   try {
