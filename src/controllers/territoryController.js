@@ -154,13 +154,19 @@ async function closingEdgeOverOwnTerritory(userId, start, end) {
       .filter((r) => Array.isArray(r) && r.length >= 3)
       .map((r) => r.map(([lng, lat]) => [lat, lng])); // GeoJSON [lng,lat] → pointInPolygon [lat,lng]
     if (!rings.length) return false;
+    const inOwn = (lat, lng) => rings.some((r) => pointInPolygon(lat, lng, r));
+    // 1) KENGAYTIRISH: yo'lning IKKALA uchi (boshi va oxiri) o'z hududingiz ichida bo'lsa —
+    //    bir tomoni allaqachon yopilgan hududingiz, qolgani yangi yurilgan yo'l. Ruxsat
+    //    (merge yopuvchi chiziqni o'z hududingiz ichiga yutadi — uzun chiziq ko'rinmaydi).
+    if (inOwn(start[0], start[1]) && inOwn(end[0], end[1])) return true;
+    // 2) Yoki yopuvchi to'g'ri chiziqning ko'p qismi (≥80%) o'z hududingiz ustidan o'tsa.
     const N = 10;
     let inside = 0;
     for (let i = 0; i <= N; i++) {
       const f = i / N;
       const lat = start[0] + (end[0] - start[0]) * f;
       const lng = start[1] + (end[1] - start[1]) * f;
-      if (rings.some((r) => pointInPolygon(lat, lng, r))) inside++;
+      if (inOwn(lat, lng)) inside++;
     }
     return inside / (N + 1) >= 0.8;
   } catch (_) {
