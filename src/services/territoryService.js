@@ -424,7 +424,7 @@ async function captureTerritory(userId, rawPoints) {
   const xpMultiplier = myEnt.xpMult; // Free 1× / Pro 2× / Ultra 3×
   // XP — HAQIQATDA egallangan (kesilgan) maydon asosida; bosqin bonusi faqat real yer olinsa.
   const xpGained = (
-    Math.floor((finalArea / 100) * constants.XP_PER_100M2) +
+    Math.floor(Math.pow(finalArea / 100, 0.75) * constants.XP_PER_100M2) +
     constants.XP_TERRITORY_CAPTURE_BONUS +
     (anyRealSteal ? constants.XP_INVASION_BONUS : 0)
   ) * xpMultiplier;
