@@ -669,12 +669,21 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
     const bboxStr = JSON.stringify(bboxPolygon);
     
     try {
+      // XARITA UCHUN SODDALASHTIRILGAN geometriya qaytaramiz. Bino-niqob (buildingMaskService)
+      // hududlarni uy konturlariga moslab kesgani uchun saqlangan polygon JUDA ko'p nuqtali —
+      // xom holда yuborish xaritani sekinlashtirar edi. Saqlangan ANIQ shaklга tegmaymiz, faqat
+      // KO'RSATISH uchun ~3m tolerance bilan soddalashtirib (ST_SimplifyPreserveTopology) va 6 xona
+      // aniqlik bilan beramiz → payload bir necha barobar kichrayadi, ko'rinishi deyarli bir xil.
       const rawTerritories = await prisma.$queryRaw`
-        SELECT t.*, 
-               u.username as "ownerUsername", 
-               u.level as "ownerLevel", 
-               u.color as "ownerColor", 
-               u."isPremium" as "ownerIsPremium", 
+        SELECT t.id, t."ownerId", t."teamId", t.area, t.color, t."capturedAt",
+               t.name, t.emoji, t."createdAt", t."updatedAt",
+               ST_AsGeoJSON(
+                 ST_SimplifyPreserveTopology(ST_GeomFromGeoJSON(t.polygon::text), 0.00003), 6
+               )::json AS polygon,
+               u.username as "ownerUsername",
+               u.level as "ownerLevel",
+               u.color as "ownerColor",
+               u."isPremium" as "ownerIsPremium",
                u."premiumUntil" as "ownerPremiumUntil"
         FROM "Territory" t
         LEFT JOIN "User" u ON t."ownerId" = u.id
