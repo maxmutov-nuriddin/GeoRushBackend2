@@ -140,4 +140,7 @@ router.delete('/promocodes/:id',           p.deletePromoCode);
 const supportRoutes = require('./adminSupport');
 router.use('/support', supportRoutes);
 
+// ─── Utilities ────────────────────────────────────────────────────────────────
+router.post('/recalc-xp',                  c.recalculateXP);
+
 module.exports = router;

@@ -999,6 +999,47 @@ async function mergeTerritories(req, res, next) {
   } catch (err) { next(err); }
 }
 
+async function recalculateXP(req, res, next) {
+  try {
+    const constants = require('../config/constants');
+    const users = await prisma.user.findMany({
+      include: { territories: true }
+    });
+    
+    function calculateLevel(xp) {
+      let level = 1;
+      for (let i = 1; i < constants.LEVELS.length; i++) {
+        if (xp >= constants.LEVELS[i]) level = i + 1;
+        else break;
+      }
+      return level;
+    }
+
+    let updatedCount = 0;
+    for (const u of users) {
+      let newXp = 0;
+      for (const terr of u.territories) {
+        const areaXP = Math.floor(Math.pow(terr.area / 100, 0.75) * constants.XP_PER_100M2);
+        newXp += areaXP + constants.XP_TERRITORY_CAPTURE_BONUS;
+      }
+      newXp = Math.floor(newXp);
+      const newLevel = calculateLevel(newXp);
+      
+      if (u.xp !== newXp || u.level !== newLevel) {
+        await prisma.user.update({
+          where: { id: u.id },
+          data: { xp: newXp, level: newLevel }
+        });
+        updatedCount++;
+      }
+    }
+    
+    res.json({ message: `Barcha o'yinchilarning XP va darajalari qayta hisoblandi. ${updatedCount} ta foydalanuvchi yangilandi.` });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getStats, getUsers, getUser, updateUser, banUser, toggleAdmin, deleteUser,
   getUserWarnings, addWarning, deleteWarning, getUserActivity,
@@ -1012,4 +1053,5 @@ module.exports = {
   giveCoins, givePremium, removePremium,
   mergeTerritories,
   getMe, updateMe, verifyPassword, changePassword,
+  recalculateXP
 };
