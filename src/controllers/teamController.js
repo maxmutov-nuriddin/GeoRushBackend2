@@ -295,7 +295,7 @@ async function sendJoinRequest(req, res, next) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { teamId: true }
+      select: { teamId: true, username: true }
     });
     if (user.teamId) return res.status(400).json({ error: 'Leave your current team first' });
 
@@ -311,6 +311,15 @@ async function sendJoinRequest(req, res, next) {
     const request = await prisma.teamRequest.create({
       data: { teamId: team.id, userId: req.user.id, type: 'request' }
     });
+
+    await prisma.notification.create({
+      data: {
+        userId: team.ownerId,
+        title: 'Yangi zayavka',
+        body: `${user.username} jamoangizga qo'shilish uchun zayavka yubordi.`
+      }
+    });
+
     res.json({ request });
   } catch (err) {
     next(err);
@@ -446,6 +455,15 @@ async function inviteUser(req, res, next) {
     const request = await prisma.teamRequest.create({
       data: { teamId: team.id, userId: targetUser.id, type: 'invite' }
     });
+
+    await prisma.notification.create({
+      data: {
+        userId: targetUser.id,
+        title: 'Jamoaga taklif',
+        body: `Sizni "${team.name}" jamoasiga taklif qilishdi.`
+      }
+    });
+
     res.json({ request, username: targetUser.username });
   } catch (err) {
     next(err);
