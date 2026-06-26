@@ -6,6 +6,7 @@ const { getIo } = require('../socket/ioInstance');
 const { tierOf, entitlements } = require('../config/tiers');
 const { escapeHtml } = require('../utils/telegram');
 const { invalidateUserCache } = require('../middleware/auth');
+const { Expo } = require('expo-server-sdk');
 
 async function getProfile(req, res, next) {
   try {
@@ -263,7 +264,13 @@ async function deleteAccount(req, res, next) {
 async function savePushToken(req, res, next) {
   try {
     const { token } = req.body;
-    if (!token) return res.status(400).json({ error: 'token required' });
+    // XAVFSIZLIK: faqat HAQIQIY Expo push token qabul qilinadi (ExponentPushToken[...]).
+    // Soxta/ixtiyoriy satr (injection, spam-manzil) rad etiladi. Endpoint authenticate
+    // bilan himoyalangan (faqat token egasi o'zinikini saqlaydi) va token hech qaysi
+    // javobda qaytarilmaydi/log'ga yozilmaydi.
+    if (!token || typeof token !== 'string' || !Expo.isExpoPushToken(token)) {
+      return res.status(400).json({ error: 'invalid push token' });
+    }
     const userId = req.user.id || req.user._id;
     await prisma.user.update({
       where: { id: userId },
