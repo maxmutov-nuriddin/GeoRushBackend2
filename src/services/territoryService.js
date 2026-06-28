@@ -686,7 +686,8 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
                u.level as "ownerLevel",
                u.color as "ownerColor",
                u."isPremium" as "ownerIsPremium",
-               u."premiumUntil" as "ownerPremiumUntil"
+               u."premiumUntil" as "ownerPremiumUntil",
+               u."isBanned" as "ownerIsBanned"
         FROM "Territory" t
         LEFT JOIN "User" u ON t."ownerId" = u.id
         WHERE ST_Intersects(
@@ -698,7 +699,7 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
       territories = rawTerritories;
     } catch (err) {
       const allT = await prisma.territory.findMany({
-        include: { owner: { select: { username: true, level: true, color: true, isPremium: true, premiumUntil: true } } }
+        include: { owner: { select: { username: true, level: true, color: true, isPremium: true, premiumUntil: true, isBanned: true } } }
       });
       const bboxPoints = [
         [cSwLat, cSwLng],
@@ -718,18 +719,20 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
         ownerLevel: t.owner?.level,
         ownerColor: t.owner?.color,
         ownerIsPremium: t.owner?.isPremium,
-        ownerPremiumUntil: t.owner?.premiumUntil
+        ownerPremiumUntil: t.owner?.premiumUntil,
+        ownerIsBanned: t.owner?.isBanned
       }));
     }
   } else {
     try {
       territories = await prisma.$queryRaw`
-        SELECT t.*, 
-               u.username as "ownerUsername", 
-               u.level as "ownerLevel", 
-               u.color as "ownerColor", 
-               u."isPremium" as "ownerIsPremium", 
-               u."premiumUntil" as "ownerPremiumUntil"
+        SELECT t.*,
+               u.username as "ownerUsername",
+               u.level as "ownerLevel",
+               u.color as "ownerColor",
+               u."isPremium" as "ownerIsPremium",
+               u."premiumUntil" as "ownerPremiumUntil",
+               u."isBanned" as "ownerIsBanned"
         FROM "Territory" t
         LEFT JOIN "User" u ON t."ownerId" = u.id
         LIMIT 500
@@ -737,7 +740,7 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
     } catch (err) {
       const allT = await prisma.territory.findMany({
         take: 500,
-        include: { owner: { select: { username: true, level: true, color: true, isPremium: true, premiumUntil: true } } }
+        include: { owner: { select: { username: true, level: true, color: true, isPremium: true, premiumUntil: true, isBanned: true } } }
       });
       territories = allT.map(t => ({
         ...t,
@@ -745,7 +748,8 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
         ownerLevel: t.owner?.level,
         ownerColor: t.owner?.color,
         ownerIsPremium: t.owner?.isPremium,
-        ownerPremiumUntil: t.owner?.premiumUntil
+        ownerPremiumUntil: t.owner?.premiumUntil,
+        ownerIsBanned: t.owner?.isBanned
       }));
     }
   }
@@ -756,10 +760,13 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
     ownerId: t.ownerId,
     ownerUsername: t.ownerUsername,
     ownerLevel: t.ownerLevel,
+    // Banlangan egasining hududi "ochiq" — premiumsiz deb yuboramiz, shunda mijoz qulf
+    // chizmaydi va istalgan o'yinchi egallay oladi (server capture ham himoyani o'tkazib yuboradi).
     ownerIsPremium: !!(
       t.ownerIsPremium &&
       t.ownerPremiumUntil &&
-      now < new Date(t.ownerPremiumUntil)
+      now < new Date(t.ownerPremiumUntil) &&
+      !t.ownerIsBanned
     ),
     teamId: t.teamId || null,
     area: t.area,
