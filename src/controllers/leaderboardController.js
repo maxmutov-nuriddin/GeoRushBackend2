@@ -12,7 +12,8 @@ async function getPlayerLeaderboard(req, res, next) {
     const limit = Math.min(parseInt(req.query.limit || '50'), 200);
     const reqScope = req.query.scope || 'global';
 
-    let filter = { isAdmin: false };
+    // Banlangan foydalanuvchilar reytingda KO'RINMAYDI (ban olinsa yana paydo bo'ladi).
+    let filter = { isAdmin: false, isBanned: false };
     let scope = 'global';
     if (reqScope === 'friends') {
       // Do'stlar reytingi — barcha tierlar uchun ochiq. Faqat do'stlar + o'zim.
@@ -110,6 +111,7 @@ async function getMyRank(req, res, next) {
     const rank = await prisma.user.count({
       where: {
         isAdmin: false,
+        isBanned: false,   // banlangan o'yinchilar rank hisobiga kirmaydi (reyting bilan mos)
         OR: [
           { xp: { gt: myXp } },
           { xp: myXp, id: { lt: myId } },

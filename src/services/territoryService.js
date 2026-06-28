@@ -315,7 +315,7 @@ async function captureTerritory(userId, rawPoints) {
   const ownerDocs = uniqueOwnerIds.length
     ? await prisma.user.findMany({
         where: { id: { in: uniqueOwnerIds } },
-        select: { id: true, isPremium: true, premiumUntil: true, premiumTier: true, level: true }
+        select: { id: true, isPremium: true, premiumUntil: true, premiumTier: true, level: true, isBanned: true }
       })
     : [];
   const ownerMap = new Map(ownerDocs.map(o => [o.id, o]));
@@ -326,8 +326,10 @@ async function captureTerritory(userId, rawPoints) {
   for (const old of overlapping) {
     if (old.ownerId === userId) continue;
     const owner = ownerMap.get(old.ownerId);
+    // Banlangan egasining hududi "ochiq" — shield YO'Q, istalgan o'yinchi egallashi mumkin
+    // (ban olinsa qolgan hududi bilan davom etadi).
     // Shield: null=himoya yo'q (free); 5=pro; 0=ultra. Hujumchi owner.level - margin dan past → himoyalangan.
-    const margin = owner ? entitlements(tierOf(owner)).shieldMargin : null;
+    const margin = (owner && !owner.isBanned) ? entitlements(tierOf(owner)).shieldMargin : null;
     if (margin != null && user.level < (owner.level - margin)) protectedList.push(old);
     else deletableList.push(old);
   }
