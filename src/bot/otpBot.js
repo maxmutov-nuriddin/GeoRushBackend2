@@ -6,7 +6,12 @@ const { prisma }   = require('../config/database');
 // welcomeCoins kabi qiymatlar uchun YAGONA manba — tiers.js. Avval bu faylda 350/1000
 // hardcode edi, admin panel esa tiers'dagi 2500/7500 berardi — bir xil narxga har xil bonus.
 const { TIERS }    = require('../config/tiers');
+const { encPhone, encTelegram, dec } = require('../utils/fieldCrypto');
 const { recordPremiumPurchase } = require('../services/premiumLedger');
+
+// Telefon/telegram qidiruvi migration o'tish davrida ham ishlasin (plaintext + shifrli).
+function phoneMatch(p) { const e = encPhone(p); return e === p ? [p] : [p, e]; }
+function tgMatch(c)    { const s = String(c); const e = encTelegram(s); return e === s ? [s] : [s, e]; }
 const { promoApplies, userAlreadyUsedPromo } = require('../controllers/promoController');
 
 // DB-backed yordamchi funksiyalar (server restart bo'lsa ham saqlanadi)
@@ -156,7 +161,7 @@ async function sendPremiumInfo(chatId) {
   if (!bot) return;
   try {
     const user = await prisma.user.findFirst({
-      where: { telegramChatId: String(chatId) },
+      where: { telegramChatId: { in: tgMatch(chatId) } },
       select: { username: true, isPremium: true, premiumUntil: true, premiumTier: true },
     });
     if (user && isActivePremium(user)) {
@@ -656,12 +661,12 @@ async function initBot() {
       // to'lovi 400 ("Telegram bot bilan ulanmagan") berardi. Raqam Telegram tomonidan
       // tasdiqlangan (yuqorida user_id === from.id), shuning uchun bog'lash xavfsiz.
       try {
-        const u = await prisma.user.findUnique({
-          where: { phone: incomingPhone },
+        const u = await prisma.user.findFirst({
+          where: { phone: { in: phoneMatch(incomingPhone) } },
           select: { id: true, telegramChatId: true },
         });
-        if (u && u.telegramChatId !== chatId) {
-          await prisma.user.update({ where: { id: u.id }, data: { telegramChatId: chatId } });
+        if (u && dec(u.telegramChatId) !== String(chatId)) {
+          await prisma.user.update({ where: { id: u.id }, data: { telegramChatId: encTelegram(String(chatId)) } });
           logger.info(`telegramChatId bog'landi: userId=${u.id}`);
         }
       } catch (err) {
@@ -726,15 +731,15 @@ async function initBot() {
 
       // /link oqimi — mavjud foydalanuvchi chatId ni bog'laydi
       try {
-        const existingInfo = await prisma.user.findUnique({
-          where: { phone: incomingPhone },
+        const existingInfo = await prisma.user.findFirst({
+          where: { phone: { in: phoneMatch(incomingPhone) } },
           select: { id: true, username: true }
         });
 
         if (existingInfo) {
           const existing = await prisma.user.update({
             where: { id: existingInfo.id },
-            data: { telegramChatId: chatId },
+            data: { telegramChatId: encTelegram(String(chatId)) },
             select: { username: true }
           });
           bot.sendMessage(chatId,

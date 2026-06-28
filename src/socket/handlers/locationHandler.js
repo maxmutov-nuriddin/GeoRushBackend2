@@ -3,6 +3,7 @@ const { haversineDistance } = require('../../services/geoService');
 const trailStore = require('../../services/trailStore');
 const onlineStore = require('../../services/onlineStore');
 const { prisma } = require('../../config/database');
+const { encLocation } = require('../../utils/fieldCrypto');
 const constants = require('../../config/constants');
 const { entitlements } = require('../../config/tiers');
 const logger = require('../../utils/logger');
@@ -214,7 +215,7 @@ function handleLocation(io, socket) {
       onlineStore.mirrorEntry(userId);
 
       const updateData = {
-        lastLocation: { type: 'Point', coordinates: [lng, lat] },
+        lastLocation: encLocation({ type: 'Point', coordinates: [lng, lat] }),
         lastSeen: new Date(),
       };
       if (distToFlush > 0) {

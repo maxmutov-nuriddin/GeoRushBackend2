@@ -9,6 +9,7 @@ const { invalidateUserCache } = require('../middleware/auth');
 const { recordPremiumPurchase, discountedSom, baseSomFor } = require('../services/premiumLedger');
 const { mergeAllOwnTerritories } = require('../services/territoryMergeBackfill');
 const { logAdminAction } = require('../services/auditLog');
+const { encPhone, dec, decLocation } = require('../utils/fieldCrypto');
 
 // Admin pagination uchun `take` qiymatini chegaralash — `?limit=999999` kabi so'rov
 // katta javob/DoS yaratmasin. Default destructuring (20/30/50) saqlanadi; faqat yuqori
@@ -177,10 +178,15 @@ async function getUsers(req, res, next) {
     const { search = '', filter = 'all', page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
     
+    // Phone DB'da shifrli (deterministik) — substring qidiruv shifrli matnda ishlamaydi.
+    // Username substring + (eski plaintext uchun) phone substring + to'liq raqamning
+    // shifrli aniq mosligi bo'yicha qidiramiz. Ya'ni admin TO'LIQ raqam yozsa topiladi.
+    const phoneDigits = search ? String(search).replace(/\D/g, '') : '';
     const searchCondition = search ? {
       OR: [
         { username: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search, mode: 'insensitive' } }
+        { phone: { contains: search, mode: 'insensitive' } },
+        ...(phoneDigits ? [{ phone: encPhone(phoneDigits) }] : []),
       ]
     } : {};
     
@@ -202,7 +208,7 @@ async function getUsers(req, res, next) {
       prisma.user.count({ where }),
     ]);
     
-    const mappedUsers = users.map(u => ({ ...u, _id: u.id }));
+    const mappedUsers = users.map(u => ({ ...u, phone: dec(u.phone), _id: u.id }));
     res.json({ users: mappedUsers, total, page: Number(page), limit: Number(limit) });
   } catch (err) { next(err); }
 }
@@ -218,6 +224,10 @@ async function getUser(req, res, next) {
     delete user.passwordHash;
     delete user.passwordResetToken;
     delete user.passwordResetExpires;
+    // PII shifrli — admin UI uchun ochamiz
+    if (user.phone) user.phone = dec(user.phone);
+    if (user.telegramChatId) user.telegramChatId = dec(user.telegramChatId);
+    if (user.lastLocation) user.lastLocation = decLocation(user.lastLocation);
     user._id = user.id;
 
     const territories = await prisma.territory.count({ where: { ownerId: req.params.id } });
@@ -759,7 +769,7 @@ async function getLiveMap(req, res, next) {
         username: u.username,
         color: u.color,
         level: u.level,
-        lastLocation: liveLocation || u.lastLocation || null,
+        lastLocation: liveLocation || decLocation(u.lastLocation) || null,
         isLive: liveLocation != null,
       };
     });
@@ -937,7 +947,7 @@ async function getMe(req, res, next) {
       where: { id: reqUserId.toString() },
       select: { id: true, username: true, phone: true, color: true, xp: true, level: true, isAdmin: true, termsAccepted: true, createdAt: true }
     });
-    res.json({ user: { ...user, _id: user.id } });
+    res.json({ user: { ...user, phone: dec(user.phone), _id: user.id } });
   } catch (err) { next(err); }
 }
 

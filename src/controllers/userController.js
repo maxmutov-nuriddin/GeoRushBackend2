@@ -4,6 +4,7 @@ const { validationResult } = require('express-validator');
 const { prisma } = require('../config/database');
 const { getIo } = require('../socket/ioInstance');
 const { tierOf, entitlements } = require('../config/tiers');
+const { decLocation } = require('../utils/fieldCrypto');
 const { escapeHtml } = require('../utils/telegram');
 const { invalidateUserCache } = require('../middleware/auth');
 const { Expo } = require('expo-server-sdk');
@@ -148,15 +149,18 @@ async function getOnlinePlayers(req, res, next) {
     });
 
     res.json({
-      players: players.map((p) => ({
-        id: p.id,
-        username: p.username,
-        color: p.color,
-        level: p.level,
-        teamId: p.teamId,
-        lat: p.lastLocation?.coordinates?.[1],
-        lng: p.lastLocation?.coordinates?.[0],
-      })),
+      players: players.map((p) => {
+        const loc = decLocation(p.lastLocation);
+        return {
+          id: p.id,
+          username: p.username,
+          color: p.color,
+          level: p.level,
+          teamId: p.teamId,
+          lat: loc?.coordinates?.[1],
+          lng: loc?.coordinates?.[0],
+        };
+      }),
     });
   } catch (err) {
     next(err);

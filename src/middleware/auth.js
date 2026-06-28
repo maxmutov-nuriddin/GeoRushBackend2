@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { prisma } = require('../config/database');
 const { hitUserRateLimit } = require('./userRateLimiter');
+const { dec } = require('../utils/fieldCrypto');
 
 // ── Foydalanuvchi cache (30 soniya TTL) ───────────────────────────────────────
 // Har REST so'rovda DB ga bormaslik uchun. Ban/delete/role o'zgarganda
@@ -79,6 +80,9 @@ async function authenticate(req, res, next) {
     let user = _getCached(decoded.userId);
     if (!user) {
       user = await prisma.user.findUnique({ where: { id: decoded.userId }, select: USER_SELECT });
+      // phone DB'da shifrli — downstream kod plaintext kutadi, shuning uchun keshga
+      // ochilgan holda joylaymiz (faqat req.user uchun; DB o'zgarmaydi).
+      if (user && user.phone) user.phone = dec(user.phone);
       if (user && !user.isBanned) _setCache(decoded.userId, user);
     }
 

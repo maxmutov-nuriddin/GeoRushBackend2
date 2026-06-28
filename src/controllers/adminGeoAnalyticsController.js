@@ -3,6 +3,7 @@
 // Read-only. adminAuth ortida ishlaydi.
 // ─────────────────────────────────────────────────────────────────────────────
 const { prisma } = require('../config/database');
+const { decLocation } = require('../utils/fieldCrypto');
 
 async function getGeoAnalyticsData(req, res, next) {
   try {
@@ -92,7 +93,7 @@ async function getGeoAnalyticsData(req, res, next) {
       withLocation,
       territoryDensity,
       totalTerritories,
-      recentLocations,
+      recentLocations: recentLocations.map(u => ({ ...u, lastLocation: decLocation(u.lastLocation) })),
       geoCoverage,
     });
   } catch (err) { next(err); }

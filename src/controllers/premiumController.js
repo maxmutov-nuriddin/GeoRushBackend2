@@ -2,6 +2,7 @@ const { prisma } = require('../config/database');
 const { sendPremiumInvoice, sendCoinInvoice, COIN_PACKS } = require('../bot/otpBot');
 const { tierOf, entitlementsPublic } = require('../config/tiers');
 const { applyPendingRollover } = require('../services/premiumRollover');
+const { dec } = require('../utils/fieldCrypto');
 const logger = require('../utils/logger');
 
 // GET /api/premium/status
@@ -46,7 +47,7 @@ async function sendInvoice(req, res, next) {
     const period = req.body.period || 'monthly'; // 'monthly' | 'yearly'
     const promoCode = req.body.promoCode || null;
 
-    await sendPremiumInvoice(user.telegramChatId, req.user.id, tier, period, promoCode);
+    await sendPremiumInvoice(dec(user.telegramChatId), req.user.id, tier, period, promoCode);
     res.json({ ok: true, message: 'Invoice Telegram ga yuborildi' });
   } catch (err) {
     // Telegram/bot xatosini umumiy 500 ga "yutib yubormaymiz" — aniq sababni logga yozib,
@@ -87,7 +88,7 @@ async function sendCoinInvoiceHandler(req, res, next) {
         hint: 'Bot ichida /link komandasini yuboring va raqamingizni ulashing',
       });
     }
-    await sendCoinInvoice(user.telegramChatId, req.user.id, packId);
+    await sendCoinInvoice(dec(user.telegramChatId), req.user.id, packId);
     res.json({ ok: true, message: 'Invoice Telegram ga yuborildi' });
   } catch (err) {
     const tgMsg = err?.response?.body?.description || err?.message || 'Nomaʼlum xato';

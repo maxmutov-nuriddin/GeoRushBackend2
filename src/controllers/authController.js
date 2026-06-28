@@ -6,7 +6,15 @@ const { prisma } = require('../config/database');
 const { recordFailedAttempt, recordSuccess, getIp } = require('../middleware/ipBlocker');
 const { tierOf, entitlementsPublic } = require('../config/tiers');
 const { invalidateUserCache } = require('../middleware/auth');
+const { encPhone, encTelegram, dec } = require('../utils/fieldCrypto');
 const logger = require('../utils/logger');
+
+// Telefon bo'yicha qidiruv — migration o'tish davrida ham ishlasin: HAM eski plaintext,
+// HAM yangi shifrli qiymatni qidiramiz (encPhone passthrough'da plaintext qaytaradi).
+function phoneMatch(normalized) {
+  const enc = encPhone(normalized);
+  return enc === normalized ? [normalized] : [normalized, enc];
+}
 
 // tokenVersion berilsa JWT'ga `tv` claim qo'shiladi (token-revoke uchun). Berilmasa
 // claim QO'SHILMAYDI — token "legacy" sifatida ishlaydi va revoke-tekshiruvidan o'tadi
@@ -81,7 +89,7 @@ function serializeUser(u) {
   return {
     id: u.id,
     username: u.username,
-    phone: u.phone || null,
+    phone: dec(u.phone) || null,
     color: u.color,
     xp: u.xp,
     level: u.level,
@@ -124,8 +132,8 @@ async function login(req, res, next) {
     if (!phone || !password) return res.status(400).json({ error: 'phone va password required' });
 
     const ip = getIp(req);
-    const user = await prisma.user.findUnique({
-      where: { phone: normalizePhone(phone) }
+    const user = await prisma.user.findFirst({
+      where: { phone: { in: phoneMatch(normalizePhone(phone)) } }
     });
     if (!user) {
       recordFailedAttempt(ip);
@@ -168,12 +176,12 @@ async function requestOtp(req, res, next) {
     if (normalized.length < 10) return res.status(400).json({ error: 'Noto\'g\'ri raqam formati' });
 
     if (purpose === 'register') {
-      const taken = await prisma.user.findFirst({ where: { phone: normalized } });
+      const taken = await prisma.user.findFirst({ where: { phone: { in: phoneMatch(normalized) } } });
       if (taken) return res.status(409).json({ error: 'Bu raqam allaqachon ro\'yxatdan o\'tgan', code: 'PHONE_TAKEN' });
     }
 
     if (purpose === 'reset') {
-      const exists = await prisma.user.findFirst({ where: { phone: normalized } });
+      const exists = await prisma.user.findFirst({ where: { phone: { in: phoneMatch(normalized) } } });
       if (!exists) return res.status(404).json({ error: 'Bu raqam topilmadi' });
     }
 
@@ -266,16 +274,16 @@ async function registerWithPhone(req, res, next) {
     const normalized = session.phone;
 
     const exists = await prisma.user.findFirst({
-      where: { OR: [{ phone: normalized }, { username }] }
+      where: { OR: [{ phone: { in: phoneMatch(normalized) } }, { username }] }
     });
     if (exists) return res.status(409).json({ error: 'Username yoki raqam allaqachon band' });
 
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await prisma.user.create({
       data: {
-        username, phone: normalized, passwordHash, color,
+        username, phone: encPhone(normalized), passwordHash, color,
         coins: 50,
-        telegramChatId: session.chatId ? String(session.chatId) : null,
+        telegramChatId: session.chatId ? encTelegram(String(session.chatId)) : null,
       }
     });
 
@@ -311,7 +319,7 @@ async function resetPasswordWithPhone(req, res, next) {
 
     if (!session) return res.status(400).json({ error: 'OTP tasdiqlanmagan yoki muddati o\'tgan', code: 'OTP_INVALID' });
 
-    const user = await prisma.user.findFirst({ where: { phone: session.phone } });
+    const user = await prisma.user.findFirst({ where: { phone: { in: phoneMatch(session.phone) } } });
     if (!user) return res.status(404).json({ error: 'Foydalanuvchi topilmadi' });
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
