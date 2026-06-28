@@ -41,6 +41,7 @@ const adminSetupRoutes = require('./src/routes/adminSetup');
 const shopRoutes    = require('./src/routes/shop');
 const premiumRoutes = require('./src/routes/premium');
 const contactRoutes = require('./src/routes/contact');
+const statsRoutes = require('./src/routes/stats');
 const { globalLimiter } = require('./src/middleware/rateLimiter');
 const { securityMonitor } = require('./src/middleware/securityMonitor');
 const { hppGuard } = require('./src/middleware/hpp');
@@ -182,6 +183,7 @@ app.use('/api/referral', referralRoutes);
 app.use('/api/shop',    shopRoutes);
 app.use('/api/premium', premiumRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/stats', statsRoutes);
 app.use('/map', mapRoute);
 
 app.get('/health', (req, res) => {
