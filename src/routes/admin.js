@@ -71,6 +71,10 @@ router.get('/insights/repeat-cheaters',ins.getRepeatCheaters);
 router.get('/insights/support',        ins.getSupportMetrics);
 router.get('/insights/promo-stats',    ins.getPromoStats);
 
+// ─── Piyoda trafik (anonim agregat — B2B/B2G hisobot) ───────────────────────────
+const { getTrafficAnalytics } = require('../controllers/adminTrafficController');
+router.get('/traffic',                 getTrafficAnalytics);
+
 // ─── Broadcast push (action — yangi) ────────────────────────────────────────────
 router.post('/broadcast',              sendBroadcast);
 

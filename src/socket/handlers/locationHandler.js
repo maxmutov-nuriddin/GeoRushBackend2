@@ -1,6 +1,7 @@
 const { validateLocationUpdate } = require('../../services/antiCheatService');
 const { haversineDistance } = require('../../services/geoService');
 const trailStore = require('../../services/trailStore');
+const trafficService = require('../../services/trafficService');
 const onlineStore = require('../../services/onlineStore');
 const { prisma } = require('../../config/database');
 const { encLocation } = require('../../utils/fieldCrypto');
@@ -197,6 +198,9 @@ function handleLocation(io, socket) {
       }
     }
     lastValidPoint = [lat, lng];
+
+    // Piyoda trafik agregati — sinxron xotira amali (dedup ichida), DB'ga userId tushmaydi
+    trafficService.record(userId, lat, lng);
 
     // Trail'ga nuqta qo'shamiz — fire-and-forget: bitta Redis ulanishida buyruqlar
     // FIFO tartibda boradi (yuqoridagi reset bilan tartib buzilmaydi); xotira rejimida sinxron.

@@ -216,6 +216,20 @@ async function ensureCoreTables() {
        "updatedAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
        CONSTRAINT "DailyStat_pkey" PRIMARY KEY ("date")
      )`,
+
+    // ── TrafficCell — piyoda trafik anonim agregati (trafficService.js) ────────
+    // Katak ~110m (lat/lng 3 kasr) × hafta kuni × soat. userId YO'Q — to'liq anonim,
+    // faqat "shu nuqtadan shu vaqtda N kishi o'tdi" hisobi. B2B/B2G hisobot manbasi.
+    `CREATE TABLE IF NOT EXISTS "TrafficCell" (
+       "cellLat"   DOUBLE PRECISION NOT NULL,
+       "cellLng"   DOUBLE PRECISION NOT NULL,
+       "dow"       SMALLINT NOT NULL,
+       "hour"      SMALLINT NOT NULL,
+       "count"     INTEGER NOT NULL DEFAULT 0,
+       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "TrafficCell_pkey" PRIMARY KEY ("cellLat", "cellLng", "dow", "hour")
+     )`,
+    `CREATE INDEX IF NOT EXISTS "TrafficCell_count_idx" ON "TrafficCell" ("count" DESC)`,
   ];
 
   let ok = 0;

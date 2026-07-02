@@ -25,6 +25,7 @@ const { initializeDatabase } = require('./src/config/database');
 const { initializeSocket } = require('./src/socket');
 const { setIo } = require('./src/socket/ioInstance');
 const { flushAllPendingDistances } = require('./src/socket/handlers/locationHandler');
+const { startTrafficFlusher, flushTraffic } = require('./src/services/trafficService');
 const { initBot } = require('./src/bot/otpBot');
 const { initSupportBot } = require('./src/bot/supportBot');
 const { runMergeBackfillOnce } = require('./src/services/territoryMergeBackfill');
@@ -241,6 +242,9 @@ async function start() {
     // SystemFlag bilan faqat bir marta ishlaydi. TERRITORY_AUTO_MERGE=false bilan o'chadi.
     runMergeBackfillOnce().catch((err) => logger.warn('Hudud birlashtirish (boot) xatosi:', err.message));
 
+    // Piyoda trafik agregatini davriy DB'ga tushirish (anonim, trafficService.js)
+    startTrafficFlusher();
+
     server.listen(PORT, () => {
       logger.info(`GeoRush server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
     });
@@ -257,6 +261,7 @@ process.on('SIGTERM', async () => {
   logger.info('SIGTERM received — flushing pending distances before shutdown...');
   try {
     await flushAllPendingDistances();
+    await flushTraffic();
     logger.info('Pending distances flushed');
   } catch (err) {
     logger.error('Failed to flush distances on SIGTERM', err);
