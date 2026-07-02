@@ -21,5 +21,9 @@ COPY . .
 # Portni ochish
 EXPOSE 5000
 
-# Dasturni ishga tushirish (Avval bazani yangilaydi, keyin serverni yoqadi)
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && npm start"]
+# Dasturni ishga tushirish.
+# ⚠️ `prisma db push` bu yerdan ATAYLAB olib tashlangan (2026-07-02): u schema'da
+# bo'lmagan jadval/ustunlarni O'CHIRADI (--accept-data-loss bilan ayniqsa xavfli) —
+# TrafficCell ma'lumoti shu sabab yo'qolgan edi. Jadvallar server boot'ida
+# ensureCoreTables() orqali o'zi yaratiladi.
+CMD ["npm", "start"]

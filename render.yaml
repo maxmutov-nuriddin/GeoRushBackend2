@@ -2,8 +2,13 @@ services:
   - type: web
     name: georush-backend
     env: node
-    buildCommand: npm install && npx prisma generate && npx prisma db push
-    startCommand: npx prisma db push && npm start
+    # ⚠️ `npx prisma db push` bu yerdan ATAYLAB olib tashlangan (2026-07-02):
+    # u schema.prisma'da bo'lmagan jadval/ustun/indekslarni bazadan O'CHIRADI —
+    # TrafficCell (piyoda trafik) ma'lumoti shu sabab deploy'da yo'qolgan edi.
+    # Jadval/ustunlar server boot'ida ensureCoreTables() (src/config/database.js)
+    # orqali idempotent yaratiladi — db push umuman kerak emas.
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm start
     envVars:
       - key: PORT
         value: 5000
