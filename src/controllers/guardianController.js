@@ -9,6 +9,21 @@ const logger = require('../utils/logger');
 
 const USER_MIN = { id: true, username: true, color: true, expoPushToken: true };
 
+// Suiiste'mol himoyasi: taklif va SOS push-spam bo'lib ketmasin (in-memory throttle).
+// Anti-cheat'ga aloqasi yo'q — bu shunchaki bildirishnoma toshqinini cheklaydi.
+const lastInviteAt = new Map(); // walkerId -> ts
+const lastSosAt = new Map();    // walkerId -> ts
+const INVITE_COOLDOWN_MS = 30 * 1000;
+const SOS_COOLDOWN_MS = 60 * 1000;
+
+function throttled(map, key, cooldownMs) {
+  const now = Date.now();
+  if (now - (map.get(key) || 0) < cooldownMs) return true;
+  map.set(key, now);
+  if (map.size > 10000) map.clear(); // cheksiz o'sishning oldini olish
+  return false;
+}
+
 async function getSession(id) {
   const rows = await prisma.$queryRawUnsafe(
     `SELECT * FROM "GuardianSession" WHERE "id" = $1`, id
@@ -29,6 +44,9 @@ async function invite(req, res, next) {
     }
     if (String(friendId) === String(me)) {
       return res.status(400).json({ error: 'SELF_NOT_ALLOWED' });
+    }
+    if (throttled(lastInviteAt, String(me), INVITE_COOLDOWN_MS)) {
+      return res.status(429).json({ error: 'TOO_MANY_INVITES' });
     }
 
     // Faqat accepted do'st hamroh bo'la oladi
@@ -166,6 +184,9 @@ async function sos(req, res, next) {
     const s = await getSession(req.params.id);
     if (!s || String(s.walkerId) !== me) return res.status(404).json({ error: 'NOT_FOUND' });
     if (s.status !== 'active') return res.status(409).json({ error: 'NOT_ACTIVE' });
+    if (throttled(lastSosAt, me, SOS_COOLDOWN_MS)) {
+      return res.status(429).json({ error: 'SOS_COOLDOWN' });
+    }
 
     const pos = onlineStore.getLocal(me);
     const [walker, guardian] = await Promise.all([

@@ -251,6 +251,7 @@ async function start() {
     // "Hamroh" — faol kuzatuv sessiyalarini tiklash + eskirganlarni davriy yopish
     await guardianService.loadActive();
     guardianService.startSweeper();
+    guardianService.startSignalWatch(io);
 
     server.listen(PORT, () => {
       logger.info(`GeoRush server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
