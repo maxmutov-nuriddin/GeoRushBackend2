@@ -43,4 +43,64 @@ async function getPublicStats(req, res, next) {
   }
 }
 
-module.exports = { getPublicStats };
+// ── Jonli globus (landing) — anonim hudud nuqtalari ─────────────────────────
+// Faqat markaz-nuqta + rang + vaqt qaytadi: username/ID/geometriya YO'Q.
+// Xuddi shu 5 daqiqalik jarayon-ichi cache uslubi.
+let globeCache = { data: null, at: 0 };
+const GLOBE_LIMIT = 800;
+
+// GeoJSON Polygon markazi — tashqi halqa o'rtachasi (ko'rsatish uchun yetarli aniqlik)
+function polygonCenter(polygon) {
+  try {
+    const ring = polygon?.coordinates?.[0];
+    if (!Array.isArray(ring) || ring.length < 3) return null;
+    let sLng = 0, sLat = 0;
+    for (const [lng, lat] of ring) { sLng += lng; sLat += lat; }
+    return [sLat / ring.length, sLng / ring.length];
+  } catch { return null; }
+}
+
+// GET /api/stats/globe
+// { points: [{ lat, lng, color, t }], total } — t = capturedAt (epoch ms, puls uchun)
+async function getGlobePoints(req, res) {
+  try {
+    if (globeCache.data && Date.now() - globeCache.at < TTL_MS) {
+      res.set('Cache-Control', 'public, max-age=300');
+      return res.json(globeCache.data);
+    }
+
+    const [rows, total] = await Promise.all([
+      prisma.territory.findMany({
+        where: { owner: { isAdmin: false, isBanned: false } },
+        select: { polygon: true, color: true, capturedAt: true },
+        orderBy: { capturedAt: 'desc' },
+        take: GLOBE_LIMIT,
+      }),
+      prisma.territory.count({ where: { owner: { isAdmin: false } } }),
+    ]);
+
+    const points = [];
+    for (const r of rows) {
+      const c = polygonCenter(r.polygon);
+      if (!c) continue;
+      // Koordinata ~1km aniqlikkacha yaxlitlanadi — shaxsiy manzil aniqlanmasin
+      points.push({
+        lat: Math.round(c[0] * 100) / 100,
+        lng: Math.round(c[1] * 100) / 100,
+        color: r.color || '#00ff88',
+        t: new Date(r.capturedAt).getTime(),
+      });
+    }
+
+    const data = { points, total };
+    globeCache = { data, at: Date.now() };
+
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(data);
+  } catch (err) {
+    logger.warn('getGlobePoints failed:', err.message);
+    res.status(200).json({ points: [], total: null });
+  }
+}
+
+module.exports = { getPublicStats, getGlobePoints };
