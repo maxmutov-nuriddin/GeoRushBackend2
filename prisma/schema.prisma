@@ -58,6 +58,9 @@ model User {
   activeSkinColor     String?
   activeSkinMarker    String?
   activeSkinTrail     String?
+  // Prestige avatar ramkasi — ustun bazaga raw SQL bilan qo'shilgan; schema'da
+  // turmasa `prisma db push` uni O'CHIRADI (2026-07-02 TrafficCell saboqlari).
+  activeSkinFrame     String?
   lastDailyClaim      DateTime?
 
   isPremium           Boolean      @default(false)
@@ -86,6 +89,8 @@ model User {
   referralsMade          Referral[]   @relation("ReferralsMade")
   referralReceived       Referral?    @relation("ReferralReceived")
   notifications          Notification[] @relation("UserNotifications")
+  guardianWalks          GuardianSession[] @relation("GuardianWalker")
+  guardianWatches        GuardianSession[] @relation("GuardianGuardian")
 }
 
 model RefreshToken {
@@ -347,6 +352,50 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, isRead])
+}
+
+// ⚠️ MUHIM: quyidagi 3 jadval avval FAQAT ensureCoreTables() raw-SQL'da edi va
+// `prisma db push` (render startCommand'ida bor!) ularni schema'da yo'qligi uchun
+// DEPLOY PAYTIDA O'CHIRIB YUBORGAN (TrafficCell ma'lumoti yo'qoldi, 2026-07-02).
+// Endi schema'da turibdi — db push ularni boshqa tegmaydi. DDL ensureCoreTables bilan
+// AYNAN mos (ustun tur/nomlari, pkey/index/fkey nomlari) — db push no-op bo'ladi.
+
+// Piyoda trafik anonim agregati (trafficService.js) — ~110m katak × hafta kuni × soat.
+model TrafficCell {
+  cellLat   Float
+  cellLng   Float
+  dow       Int      @db.SmallInt
+  hour      Int      @db.SmallInt
+  count     Int      @default(0)
+  updatedAt DateTime @default(now())
+
+  @@id([cellLat, cellLng, dow, hour])
+  @@index([count(sort: Desc)], map: "TrafficCell_count_idx")
+}
+
+// "Hamroh" (Walk Guardian) sessiyasi — joylashuv BU YERDA SAQLANMAYDI, faqat holat.
+model GuardianSession {
+  id         String    @id
+  walkerId   String
+  guardianId String
+  status     String    @default("pending")
+  endReason  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @default(now())
+  endedAt    DateTime?
+  walker     User      @relation("GuardianWalker", fields: [walkerId], references: [id], onDelete: Cascade)
+  guardian   User      @relation("GuardianGuardian", fields: [guardianId], references: [id], onDelete: Cascade)
+
+  @@index([walkerId, status], map: "GuardianSession_walker_idx")
+  @@index([guardianId, status], map: "GuardianSession_guardian_idx")
+}
+
+// Kunlik sessiya agregati (admin dashboard "Bugungi faollik").
+model DailyStat {
+  date         String   @id
+  playtimeSec  BigInt   @default(0)
+  sessionCount Int      @default(0)
+  updatedAt    DateTime @default(now())
 }
 
 model SystemFlag {
