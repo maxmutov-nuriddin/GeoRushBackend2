@@ -43,6 +43,8 @@ const shopRoutes    = require('./src/routes/shop');
 const premiumRoutes = require('./src/routes/premium');
 const contactRoutes = require('./src/routes/contact');
 const statsRoutes = require('./src/routes/stats');
+const guardianRoutes = require('./src/routes/guardian');
+const guardianService = require('./src/services/guardianService');
 const { globalLimiter } = require('./src/middleware/rateLimiter');
 const { securityMonitor } = require('./src/middleware/securityMonitor');
 const { hppGuard } = require('./src/middleware/hpp');
@@ -185,6 +187,7 @@ app.use('/api/shop',    shopRoutes);
 app.use('/api/premium', premiumRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/guardian', guardianRoutes);
 app.use('/map', mapRoute);
 
 app.get('/health', (req, res) => {
@@ -244,6 +247,10 @@ async function start() {
 
     // Piyoda trafik agregatini davriy DB'ga tushirish (anonim, trafficService.js)
     startTrafficFlusher();
+
+    // "Hamroh" — faol kuzatuv sessiyalarini tiklash + eskirganlarni davriy yopish
+    await guardianService.loadActive();
+    guardianService.startSweeper();
 
     server.listen(PORT, () => {
       logger.info(`GeoRush server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);

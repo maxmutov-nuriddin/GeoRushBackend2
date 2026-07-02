@@ -209,6 +209,34 @@ async function ensureCoreTables() {
     //   playtimeSec  — bugun ilovada o'tkazilgan jami soniya
     //   sessionCount — bugungi UMUMIY kirib-chiqishlar (UNIK EMAS — har sessiya sanaladi)
     // Kunlik UNIK kirganlar (DAU) alohida — User.lastSeen >= bugun bo'yicha hisoblanadi.
+    // ── GuardianSession — "Hamroh" (yolg'iz yuruvchini ishonchli do'st jonli kuzatishi) ──
+    // Joylashuv bu jadvalda SAQLANMAYDI — faqat sessiya holati. Uzatish socket orqali jonli.
+    `CREATE TABLE IF NOT EXISTS "GuardianSession" (
+       "id"         TEXT NOT NULL,
+       "walkerId"   TEXT NOT NULL,
+       "guardianId" TEXT NOT NULL,
+       "status"     TEXT NOT NULL DEFAULT 'pending',
+       "endReason"  TEXT,
+       "createdAt"  TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       "updatedAt"  TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       "endedAt"    TIMESTAMP(3),
+       CONSTRAINT "GuardianSession_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE INDEX IF NOT EXISTS "GuardianSession_walker_idx"   ON "GuardianSession" ("walkerId", "status")`,
+    `CREATE INDEX IF NOT EXISTS "GuardianSession_guardian_idx" ON "GuardianSession" ("guardianId", "status")`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'GuardianSession_walkerId_fkey') THEN
+         ALTER TABLE "GuardianSession" ADD CONSTRAINT "GuardianSession_walkerId_fkey"
+           FOREIGN KEY ("walkerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'GuardianSession_guardianId_fkey') THEN
+         ALTER TABLE "GuardianSession" ADD CONSTRAINT "GuardianSession_guardianId_fkey"
+           FOREIGN KEY ("guardianId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
+
     `CREATE TABLE IF NOT EXISTS "DailyStat" (
        "date"         TEXT NOT NULL,
        "playtimeSec"  BIGINT  NOT NULL DEFAULT 0,
