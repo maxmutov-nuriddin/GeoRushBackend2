@@ -260,6 +260,10 @@ async function ensureCoreTables() {
        CONSTRAINT "TrafficCell_pkey" PRIMARY KEY ("cellLat", "cellLng", "dow", "hour")
      )`,
     `CREATE INDEX IF NOT EXISTS "TrafficCell_count_idx" ON "TrafficCell" ("count" DESC)`,
+    // Katak markazini eng yaqin PIYODA YO'LIGA yopishtirish (OSRM nearest, flush'da lazy).
+    // Xaritada kataklar uylar ustida emas, yo'l bo'ylab ko'rinishi uchun.
+    `ALTER TABLE "TrafficCell" ADD COLUMN IF NOT EXISTS "snapLat" DOUBLE PRECISION`,
+    `ALTER TABLE "TrafficCell" ADD COLUMN IF NOT EXISTS "snapLng" DOUBLE PRECISION`,
 
     // ── TrafficDaily — kunlik REAL yuruvchilar SONI (userId YO'Q, faqat raqam) ──
     `CREATE TABLE IF NOT EXISTS "TrafficDaily" (

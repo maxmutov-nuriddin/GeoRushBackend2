@@ -14,6 +14,13 @@ const MAX_BUFFER_KEYS = 20000; // himoya: buffer haddan oshsa darhol flush
 // qayerda turishidan qat'i nazar (Render = UTC; usiz "eng gavjum soat" 5 soatga adashadi).
 const TZ_OFFSET_MIN = parseInt(process.env.TRAFFIC_TZ_OFFSET_MIN || '300');
 
+// Katakni eng yaqin PIYODA YO'LIGA yopishtirish (ko'rsatish uchun) — OSRM nearest.
+// Har flush'da faqat YANGI (snap'lanmagan) kataklar, ozgina partiya — tashqi servisga
+// yuk minimal. Xato bo'lsa keyingi flush'da qayta uriniladi.
+const OSRM_BASE = process.env.OSRM_FOOT_URL || 'https://routing.openstreetmap.de/routed-foot';
+const SNAP_BATCH = 15;
+const SNAP_MAX_DIST_M = 120; // yo'l juda uzoq bo'lsa (hovli/park ichi) — o'z joyida qoladi
+
 // GPS sakrashiga qarshi gisterezis: katak faqat foydalanuvchining KAMIDA 2 ta KETMA-KET
 // nuqtasi shu katakka tushsagina sanaladi. Yurishda har katakka o'nlab nuqta tushadi
 // (2s interval, ~110m katak), shuning uchun haqiqiy o'tish hech qachon yo'qolmaydi;
@@ -123,8 +130,38 @@ async function flush() {
 
 function startTrafficFlusher() {
   if (flushTimer) return;
-  flushTimer = setInterval(() => flush().catch(() => {}), FLUSH_INTERVAL_MS);
+  flushTimer = setInterval(() => flush().then(() => snapNewCells()).catch(() => {}), FLUSH_INTERVAL_MS);
   flushTimer.unref?.();
+}
+
+// Yangi kataklarni yo'lga yopishtirish — flush'dan keyin fonda (await qilinmaydi).
+async function snapNewCells() {
+  try {
+    const cells = await prisma.$queryRawUnsafe(`
+      SELECT DISTINCT "cellLat", "cellLng" FROM "TrafficCell"
+      WHERE "snapLat" IS NULL LIMIT ${SNAP_BATCH}
+    `);
+    for (const c of cells) {
+      let sLat = c.cellLat, sLng = c.cellLng; // default: o'z joyida (retry bo'lmasin deb yoziladi)
+      try {
+        const ctrl = new AbortController();
+        const tmr = setTimeout(() => ctrl.abort(), 5000);
+        const r = await fetch(`${OSRM_BASE}/nearest/v1/driving/${c.cellLng},${c.cellLat}?number=1`, { signal: ctrl.signal });
+        clearTimeout(tmr);
+        if (r.ok) {
+          const d = await r.json();
+          const wp = d.waypoints && d.waypoints[0];
+          if (wp && wp.location && wp.distance <= SNAP_MAX_DIST_M) {
+            sLng = wp.location[0]; sLat = wp.location[1];
+          }
+        }
+      } catch { /* tarmoq xatosi — o'z joyida qoladi */ }
+      await prisma.$executeRawUnsafe(
+        `UPDATE "TrafficCell" SET "snapLat" = $1, "snapLng" = $2 WHERE "cellLat" = $3 AND "cellLng" = $4`,
+        sLat, sLng, c.cellLat, c.cellLng
+      );
+    }
+  } catch { /* best-effort */ }
 }
 
 // Graceful shutdown (SIGTERM) — qolgan bucket'lar yo'qolmasin

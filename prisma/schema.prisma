@@ -369,6 +369,9 @@ model TrafficCell {
   dow       Int      @db.SmallInt
   hour      Int      @db.SmallInt
   count     Int      @default(0)
+  // Eng yaqin piyoda yo'liga yopishtirilgan koordinata (OSRM nearest, lazy)
+  snapLat   Float?
+  snapLng   Float?
   updatedAt DateTime @default(now())
 
   @@id([cellLat, cellLng, dow, hour])

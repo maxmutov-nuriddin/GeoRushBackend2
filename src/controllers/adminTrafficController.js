@@ -42,9 +42,11 @@ async function getTrafficAnalytics(req, res) {
       `),
       // Xarita kataklari — filtr bo'yicha jamlangan, eng gavjum 3000 tasi
       prisma.$queryRawUnsafe(`
-        SELECT "cellLat" AS lat, "cellLng" AS lng, SUM("count")::int AS "visits"
+        SELECT COALESCE("snapLat", "cellLat") AS lat,
+               COALESCE("snapLng", "cellLng") AS lng,
+               SUM("count")::int AS "visits"
         FROM "TrafficCell" ${where}
-        GROUP BY "cellLat", "cellLng"
+        GROUP BY 1, 2
         ORDER BY "visits" DESC
         LIMIT 3000
       `),
