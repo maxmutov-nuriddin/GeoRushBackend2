@@ -64,7 +64,7 @@ const USER_SELECT = {
   id: true, username: true, phone: true, teamId: true, color: true, xp: true, level: true,
   totalArea: true, totalDistance: true, territoriesCaptured: true, territoriesLost: true,
   isOnline: true, expoPushToken: true, termsAccepted: true, isAdmin: true, isBanned: true,
-  coins: true, ownedSkins: true, activeSkinColor: true, activeSkinMarker: true, activeSkinTrail: true,
+  coins: true, ownedSkins: true, activeSkinColor: true, activeSkinMarker: true, activeSkinTrail: true, activeSkinNick: true,
   isPremium: true, premiumUntil: true, premiumTier: true,
   tokenVersion: true,
 };

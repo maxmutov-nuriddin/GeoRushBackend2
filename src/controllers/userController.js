@@ -30,6 +30,7 @@ async function getProfile(req, res, next) {
     const publicProfile = {
       id: user.id,
       username: user.username,
+      nickStyle: user.activeSkinNick || null,
       color: user.color,
       avatarUrl: user.avatarUrl,
       xp: user.xp,
@@ -52,7 +53,7 @@ async function getProfile(req, res, next) {
     let profile = publicProfile;
     if (isMe) {
       const { passwordHash, socketId, passwordResetToken, passwordResetExpires, ...own } = user;
-      profile = { ...own, isPremium: publicProfile.isPremium };
+      profile = { ...own, isPremium: publicProfile.isPremium, nickStyle: user.activeSkinNick || null };
     }
 
     res.json({
@@ -84,10 +85,33 @@ async function updateProfile(req, res, next) {
 
     const userId = req.user.id || req.user._id;
 
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: updates,
-      select: { username: true, color: true, xp: true, level: true, teamId: true }
+    // Ism o'zgartirish — PULLIK (coin sink). Rang almashtirish bepul qoladi.
+    // Atomik: tekshirish + yechish + yangilash bitta tranzaksiyada (race'da ikki
+    // marta yechilmaydi, coin yetmasa hech narsa o'zgarmaydi).
+    const RENAME_COST = parseInt(process.env.USERNAME_RENAME_COST || '1000');
+    const user = await prisma.$transaction(async (tx) => {
+      const cur = await tx.user.findUnique({
+        where: { id: userId },
+        select: { username: true, coins: true },
+      });
+      if (!cur) throw new Error('NOT_FOUND');
+      const renaming = !!(username && username !== cur.username);
+      if (renaming) {
+        if ((cur.coins || 0) < RENAME_COST) {
+          const e = new Error('NOT_ENOUGH_COINS');
+          e.need = RENAME_COST; e.have = cur.coins || 0;
+          throw e;
+        }
+        updates.coins = { decrement: RENAME_COST };
+      } else {
+        delete updates.username; // o'sha-o'sha ism — pul ham yechilmaydi, P2002 ham bo'lmaydi
+        if (!Object.keys(updates).length) return tx.user.findUnique({ where: { id: userId }, select: { username: true, color: true, xp: true, level: true, teamId: true, coins: true } });
+      }
+      return tx.user.update({
+        where: { id: userId },
+        data: updates,
+        select: { username: true, color: true, xp: true, level: true, teamId: true, coins: true }
+      });
     });
 
     if (color) {
@@ -101,6 +125,10 @@ async function updateProfile(req, res, next) {
 
     res.json({ user });
   } catch (err) {
+    if (err.message === 'NOT_ENOUGH_COINS') {
+      return res.status(400).json({ error: 'Coinlar yetarli emas', code: 'NOT_ENOUGH_COINS', need: err.need, have: err.have });
+    }
+    if (err.message === 'NOT_FOUND') return res.status(404).json({ error: 'User not found' });
     if (err.code === 'P2002') return res.status(409).json({ error: 'Username already taken' });
     next(err);
   }

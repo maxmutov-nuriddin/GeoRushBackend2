@@ -104,6 +104,7 @@ function serializeUser(u) {
     createdAt:    u.createdAt || null,
     activeSkins: {
       color:  u.activeSkinColor  || null,
+      nick:   u.activeSkinNick   || null,
       marker: u.activeSkinMarker || null,
       trail:  u.activeSkinTrail  || null,
     },

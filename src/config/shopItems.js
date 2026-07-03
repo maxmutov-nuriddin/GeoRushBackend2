@@ -51,6 +51,18 @@ const SHOP_ITEMS = [
   { id: 'trail_dashed',  name: 'Chiziqli Iz',    name_uz: 'Chiziqli Iz', type: 'trail', value: 'dashed',  price: 240,  rarity: 'rare' },
   { id: 'trail_bold',    name: 'Dadil Iz',       name_uz: 'Dadil Iz',    type: 'trail', value: 'bold',    price: 240,  rarity: 'rare' },
   { id: 'trail_glow',    name: 'Nurli Iz',        name_uz: 'Nurli Iz',    type: 'trail', value: 'glow',    price: 400,  rarity: 'epic' },
+
+  // ── NIK BEZAKLARI ────────────────────────────────────────────────────────────
+  // type:'nick' — reyting va profildagi ism uslubi. value = frontend nickStyles.js
+  // xaritasidagi kalit (rang/nur/belgi). badge — ism oldiga qo'yiladigan belgi.
+  { id: 'nick_ice',    name: 'Muzli Nik',    name_uz: 'Muzli Nik',    type: 'nick', value: 'ice',    price: 240,  rarity: 'rare' },
+  { id: 'nick_shadow', name: 'Soyali Nik',   name_uz: 'Soyali Nik',   type: 'nick', value: 'shadow', price: 240,  rarity: 'rare' },
+  { id: 'nick_neon',   name: 'Neon Nik',     name_uz: 'Neon Nik',     type: 'nick', value: 'neon',   price: 400,  rarity: 'epic' },
+  { id: 'nick_toxic',  name: 'Zaharli Nik',  name_uz: 'Zaharli Nik',  type: 'nick', value: 'toxic',  price: 400,  rarity: 'epic' },
+  { id: 'nick_ghost',  name: '👾 Alien Nik', name_uz: '👾 Alien Nik', type: 'nick', value: 'ghost',  price: 400,  rarity: 'epic',      badge: '👾' },
+  { id: 'nick_gold',   name: 'Oltin Nik',    name_uz: 'Oltin Nik',    type: 'nick', value: 'gold',   price: 900,  rarity: 'legendary' },
+  { id: 'nick_flame',  name: '🔥 Olov Nik',  name_uz: '🔥 Olov Nik',  type: 'nick', value: 'flame',  price: 900,  rarity: 'legendary', badge: '🔥' },
+  { id: 'nick_crown',  name: '♛ Toj Nik',    name_uz: '♛ Toj Nik',    type: 'nick', value: 'crown',  price: 1000, rarity: 'legendary', badge: '♛' },
 ];
 
 const RARITY_ORDER = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4 };

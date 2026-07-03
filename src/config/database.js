@@ -169,6 +169,8 @@ async function ensureCoreTables() {
     `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "pendingResetAt" TIMESTAMP(3)`,
     `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "pendingCoins" INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "pendingTier" TEXT`,
+    // Nik bezagi (shop type:'nick') — reyting/profildagi ism uslubi
+    `ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "activeSkinNick" TEXT`,
 
     // ── Support chat (Telegram support-bot + admin panel) ──────────────────────
     // prisma db push ISHLATILMAYDI — jadvallar shu yerda raw SQL bilan yaratiladi.

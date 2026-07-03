@@ -61,6 +61,8 @@ model User {
   // Prestige avatar ramkasi — ustun bazaga raw SQL bilan qo'shilgan; schema'da
   // turmasa `prisma db push` uni O'CHIRADI (2026-07-02 TrafficCell saboqlari).
   activeSkinFrame     String?
+  // Nik bezagi (shop type:'nick') — ensureCoreTables'da ham ALTER bor
+  activeSkinNick      String?
   lastDailyClaim      DateTime?
 
   isPremium           Boolean      @default(false)

@@ -52,6 +52,7 @@ async function getPlayerLeaderboard(req, res, next) {
     const leaderboard = players.map((p, i) => ({
       id: p.id,
       username: p.username,
+      nickStyle: p.activeSkinNick || null,
       color: p.color,
       xp: p.xp,
       level: p.level,

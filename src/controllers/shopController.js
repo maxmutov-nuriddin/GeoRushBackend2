@@ -11,6 +11,7 @@ const SKIN_FIELD = {
   color:  'activeSkinColor',
   marker: 'activeSkinMarker',
   trail:  'activeSkinTrail',
+  nick:   'activeSkinNick',
 };
 
 function buildActiveSkins(user) {
@@ -19,6 +20,7 @@ function buildActiveSkins(user) {
     color:  user.activeSkinColor  || (old?.startsWith('color_')  ? old : null),
     marker: user.activeSkinMarker || (old?.startsWith('marker_') ? old : null),
     trail:  user.activeSkinTrail  || (old?.startsWith('trail_')  ? old : null),
+    nick:   user.activeSkinNick   || null,
   };
 }
 
@@ -79,6 +81,7 @@ async function getMyShop(req, res, next) {
         activeSkinColor: true,
         activeSkinMarker: true,
         activeSkinTrail: true,
+        activeSkinNick: true,
         lastDailyClaim: true,
         isPremium: true,
         premiumUntil: true,
@@ -186,6 +189,7 @@ async function buyItem(req, res, next) {
           activeSkinColor: true,
           activeSkinMarker: true,
           activeSkinTrail: true,
+          activeSkinNick: true,
           color: true
         }
       });
@@ -226,6 +230,7 @@ async function equipItem(req, res, next) {
         activeSkinColor: true,
         activeSkinMarker: true,
         activeSkinTrail: true,
+        activeSkinNick: true,
         color: true
       }
     });
@@ -251,6 +256,7 @@ async function equipItem(req, res, next) {
         activeSkinColor: true,
         activeSkinMarker: true,
         activeSkinTrail: true,
+        activeSkinNick: true,
         color: true
       }
     });
@@ -276,6 +282,7 @@ async function unequipItem(req, res, next) {
         activeSkinColor: true,
         activeSkinMarker: true,
         activeSkinTrail: true,
+        activeSkinNick: true,
         color: true,
         ownedSkins: true
       }
@@ -309,6 +316,7 @@ async function unequipItem(req, res, next) {
         activeSkinColor: true,
         activeSkinMarker: true,
         activeSkinTrail: true,
+        activeSkinNick: true,
         color: true
       }
     });
