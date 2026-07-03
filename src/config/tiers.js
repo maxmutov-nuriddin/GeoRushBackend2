@@ -73,7 +73,9 @@ const TIERS = {
     welcomeCoins: 2500,   // 7500→2500 (2026-06-22 balans): avval ~barcha skinni darhol olardi
                           // (grind yo'q → zerikish); endi legendary+qo'shimcha, ongoing 2x coin+3x XP
     dailyCoins: 30,
-    freeSkins: true,
+    // 2026-07-03: Ultra ham skinlarni COIN'ga sotib oladi (coin qadri/sink uchun).
+    // Shop'dagi owned/free/equip tekshiruvlari shu bayroqdan o'qiydi — flip yetarli.
+    freeSkins: false,
     badge: 'elite',
     price: 79900,
   },
