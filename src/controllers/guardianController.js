@@ -7,7 +7,7 @@ const guardianService = require('../services/guardianService');
 const onlineStore = require('../services/onlineStore');
 const logger = require('../utils/logger');
 
-const USER_MIN = { id: true, username: true, color: true, expoPushToken: true };
+const USER_MIN = { id: true, username: true, color: true, expoPushToken: true, activeSkinNick: true };
 
 // Suiiste'mol himoyasi: taklif va SOS push-spam bo'lib ketmasin (in-memory throttle).
 // Anti-cheat'ga aloqasi yo'q — bu shunchaki bildirishnoma toshqinini cheklaydi.
@@ -81,7 +81,7 @@ async function invite(req, res, next) {
 
     // Hamrohga xabar: socket (onlayn bo'lsa darhol modal) + push (yopiq bo'lsa ham yetadi)
     io(req)?.to(`user:${friendId}`).emit('guardian:invite', {
-      sessionId: id, walker: { id: walker.id, username: walker.username, color: walker.color },
+      sessionId: id, walker: { id: walker.id, username: walker.username, color: walker.color, nickStyle: walker.activeSkinNick || null },
     });
     if (guardian?.expoPushToken) {
       sendExpoPush(guardian.expoPushToken, '🛡 GeoRush Hamroh',
@@ -221,9 +221,9 @@ async function activeSessions(req, res, next) {
     );
     const ids = [...new Set(rows.flatMap((r) => [r.walkerId, r.guardianId]))];
     const users = ids.length
-      ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, username: true, color: true } })
+      ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, username: true, color: true, activeSkinNick: true } })
       : [];
-    const byId = Object.fromEntries(users.map((u) => [u.id, u]));
+    const byId = Object.fromEntries(users.map((u) => [u.id, { id: u.id, username: u.username, color: u.color, nickStyle: u.activeSkinNick || null }]));
     res.json({
       sessions: rows.map((r) => ({
         id: r.id, status: r.status, createdAt: r.createdAt,

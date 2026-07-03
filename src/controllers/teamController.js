@@ -63,11 +63,12 @@ async function getTeam(req, res, next) {
     const now = new Date();
     const members = await prisma.user.findMany({
       where: { teamId: team.id },
-      select: { id: true, username: true, color: true, xp: true, level: true, totalArea: true, isPremium: true, premiumUntil: true, premiumTier: true },
+      select: { id: true, username: true, color: true, xp: true, level: true, totalArea: true, isPremium: true, premiumUntil: true, premiumTier: true, activeSkinNick: true },
       orderBy: { xp: 'desc' }
     });
 
     const membersWithPremium = members.map(m => ({
+      nickStyle: m.activeSkinNick || null,
       ...m,
       isPremium: !!(m.isPremium && m.premiumUntil && now < new Date(m.premiumUntil)),
       tier: tierOf(m)
@@ -337,7 +338,7 @@ async function getJoinRequests(req, res, next) {
     const requests = await prisma.teamRequest.findMany({
       where: { teamId: team.id, type: 'request', status: 'pending' },
       include: {
-        user: { select: { username: true, color: true, level: true } }
+        user: { select: { username: true, color: true, level: true, activeSkinNick: true } }
       },
       orderBy: { createdAt: 'desc' }
     });

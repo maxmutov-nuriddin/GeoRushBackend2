@@ -7,6 +7,7 @@ const { tierOf } = require('../config/tiers');
 const PUBLIC_USER_SELECT = {
   id: true, username: true, color: true, level: true, xp: true,
   totalArea: true, isOnline: true, isPremium: true, premiumUntil: true, premiumTier: true,
+  activeSkinNick: true,
 };
 
 function mapPublicUser(u) {
@@ -16,6 +17,7 @@ function mapPublicUser(u) {
     ...u,
     isPremium: !!(u.isPremium && u.premiumUntil && now < new Date(u.premiumUntil)),
     tier: tierOf(u),
+    nickStyle: u.activeSkinNick || null,
   };
 }
 
