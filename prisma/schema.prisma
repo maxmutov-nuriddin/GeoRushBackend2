@@ -392,6 +392,13 @@ model GuardianSession {
   @@index([guardianId, status], map: "GuardianSession_guardian_idx")
 }
 
+// Kunlik REAL piyoda yuruvchilar soni (trafficService) — userId saqlanmaydi.
+model TrafficDaily {
+  date      String   @id
+  walkers   Int      @default(0)
+  updatedAt DateTime @default(now())
+}
+
 // Kunlik sessiya agregati (admin dashboard "Bugungi faollik").
 model DailyStat {
   date         String   @id

@@ -22,6 +22,11 @@ const CONFIRM_POINTS = 2;
 let pending = new Map(); // userId -> { key, streak }
 const MAX_PENDING = 50000;
 
+// Kunlik REAL yuruvchilar — userId FAQAT xotirada (Set), bazaga faqat UMUMIY SON
+// yoziladi (TrafficDaily.walkers). "Bugun nechta odam yurdi" savoliga aniq javob.
+let dayWalkers = new Set();
+let dayStamp = '';
+
 // key `${cellLat}|${cellLng}|${dow}|${hour}` -> { count }
 let buffer = new Map();
 let flushTimer = null;
@@ -38,6 +43,12 @@ const MAX_SEEN = 300000; // himoya: xotira cheksiz o'smasin
 function record(userId, lat, lng) {
   // UTC+offset — serverning o'z vaqt mintaqasiga bog'liq emas
   const shifted = new Date(Date.now() + TZ_OFFSET_MIN * 60000);
+
+  // Kunlik yuruvchi hisobi — gisterezis/dedup'dan OLDIN: bitta valid nuqta ham
+  // "bu odam bugun yurdi" degani. Kun (UZ vaqti) almashsa Set yangilanadi.
+  const dstr = shifted.toISOString().slice(0, 10);
+  if (dstr !== dayStamp) { dayStamp = dstr; dayWalkers = new Set(); }
+  dayWalkers.add(userId);
   const cellLat = Math.round(lat * 1000) / 1000; // ~110m
   const cellLng = Math.round(lng * 1000) / 1000;
   const dow = shifted.getUTCDay();   // 0=yakshanba, O'zbekiston vaqtida
@@ -73,7 +84,7 @@ function record(userId, lat, lng) {
 }
 
 async function flush() {
-  if (flushing || buffer.size === 0) return;
+  if (flushing || (buffer.size === 0 && dayWalkers.size === 0)) return;
   flushing = true;
   const batch = buffer;
   buffer = new Map();
@@ -85,7 +96,7 @@ async function flush() {
       if ([cellLat, cellLng, dow, hour, count].some((n) => !Number.isFinite(n))) continue;
       rows.push(`(${cellLat}, ${cellLng}, ${dow}, ${hour}, ${count}, NOW())`);
     }
-    if (!rows.length) return;
+    if (rows.length) {
     // Bitta so'rovda hammasi — hot path'ga N ta round-trip yuk bo'lmasin
     await prisma.$executeRawUnsafe(`
       INSERT INTO "TrafficCell" ("cellLat", "cellLng", "dow", "hour", "count", "updatedAt")
@@ -93,6 +104,16 @@ async function flush() {
       ON CONFLICT ("cellLat", "cellLng", "dow", "hour")
       DO UPDATE SET "count" = "TrafficCell"."count" + EXCLUDED."count", "updatedAt" = NOW()
     `);
+    }
+
+    // Kunlik yuruvchilar soni — GREATEST bilan (restart bo'lsa kamayib ketmasin)
+    if (dayStamp && dayWalkers.size > 0) {
+      await prisma.$executeRawUnsafe(`
+        INSERT INTO "TrafficDaily" ("date", "walkers", "updatedAt") VALUES ($1, $2, NOW())
+        ON CONFLICT ("date")
+        DO UPDATE SET "walkers" = GREATEST("TrafficDaily"."walkers", EXCLUDED."walkers"), "updatedAt" = NOW()
+      `, dayStamp, dayWalkers.size);
+    }
   } catch (err) {
     logger.warn('Traffic flush failed:', err.message.split('\n')[0]);
   } finally {

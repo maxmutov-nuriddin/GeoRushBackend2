@@ -17,7 +17,10 @@ async function getTrafficAnalytics(req, res) {
     if (hourOk) conds.push(`"hour" = ${hour}`);
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
 
-    const [totals, hourly, daily, cells] = await Promise.all([
+    const TZ_OFFSET_MIN = parseInt(process.env.TRAFFIC_TZ_OFFSET_MIN || '300');
+    const todayStr = new Date(Date.now() + TZ_OFFSET_MIN * 60000).toISOString().slice(0, 10);
+
+    const [totals, hourly, daily, cells, todayRow] = await Promise.all([
       // Umumiy: nechta katak qamrab olingan, jami o'tishlar
       prisma.$queryRawUnsafe(`
         SELECT COUNT(DISTINCT ("cellLat", "cellLng"))::int AS "cellCount",
@@ -45,9 +48,12 @@ async function getTrafficAnalytics(req, res) {
         ORDER BY "visits" DESC
         LIMIT 3000
       `),
+      // Bugungi REAL yuruvchilar soni (TrafficDaily — faqat raqam, userId yo'q)
+      prisma.$queryRawUnsafe(`SELECT "walkers" FROM "TrafficDaily" WHERE "date" = $1`, todayStr),
     ]);
 
     res.json({
+      todayWalkers: todayRow[0]?.walkers || 0,
       totalVisits: totals[0]?.totalVisits || 0,
       cellCount: totals[0]?.cellCount || 0,
       lastUpdate: totals[0]?.lastUpdate || null,

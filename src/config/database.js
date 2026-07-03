@@ -260,6 +260,14 @@ async function ensureCoreTables() {
        CONSTRAINT "TrafficCell_pkey" PRIMARY KEY ("cellLat", "cellLng", "dow", "hour")
      )`,
     `CREATE INDEX IF NOT EXISTS "TrafficCell_count_idx" ON "TrafficCell" ("count" DESC)`,
+
+    // ── TrafficDaily — kunlik REAL yuruvchilar SONI (userId YO'Q, faqat raqam) ──
+    `CREATE TABLE IF NOT EXISTS "TrafficDaily" (
+       "date"      TEXT NOT NULL,
+       "walkers"   INTEGER NOT NULL DEFAULT 0,
+       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "TrafficDaily_pkey" PRIMARY KEY ("date")
+     )`,
   ];
 
   let ok = 0;
