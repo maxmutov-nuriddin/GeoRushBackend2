@@ -44,6 +44,7 @@ const premiumRoutes = require('./src/routes/premium');
 const contactRoutes = require('./src/routes/contact');
 const statsRoutes = require('./src/routes/stats');
 const guardianRoutes = require('./src/routes/guardian');
+const safeRouteRoutes = require('./src/routes/safeRoute');
 const guardianService = require('./src/services/guardianService');
 const { globalLimiter } = require('./src/middleware/rateLimiter');
 const { securityMonitor } = require('./src/middleware/securityMonitor');
@@ -188,6 +189,7 @@ app.use('/api/premium', premiumRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/guardian', guardianRoutes);
+app.use('/api/safe-route', safeRouteRoutes);
 app.use('/map', mapRoute);
 
 app.get('/health', (req, res) => {
