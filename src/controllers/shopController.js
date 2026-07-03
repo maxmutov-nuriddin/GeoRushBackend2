@@ -47,7 +47,8 @@ async function getShopItems(req, res, next) {
         premiumTier: true,
         activeSkinColor: true,
         activeSkinMarker: true,
-        activeSkinTrail: true
+        activeSkinTrail: true,
+        activeSkinNick: true
       }
     });
 
@@ -305,6 +306,7 @@ async function unequipItem(req, res, next) {
       updateData.activeSkinColor  = null;
       updateData.activeSkinMarker = null;
       updateData.activeSkinTrail  = null;
+      updateData.activeSkinNick   = null;
       updateData.color = DEFAULT_COLOR;
     }
 
