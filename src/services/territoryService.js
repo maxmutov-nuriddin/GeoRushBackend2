@@ -771,6 +771,10 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
     teamId: t.teamId || null,
     area: t.area,
     color: t.color,
+    // Hudud nomi/emojisi — bular tushirilgani sabab nom "saqlanib, keyin yo'qolib
+    // qolayotgan" edi (DB'da bor, lekin xarita ro'yxatida kelmasdi).
+    name: t.name || null,
+    emoji: t.emoji || null,
     capturedAt: t.capturedAt,
     geometry: typeof t.polygon === 'string' ? JSON.parse(t.polygon) : t.polygon,
   }));
