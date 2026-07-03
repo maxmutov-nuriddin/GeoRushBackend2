@@ -101,6 +101,8 @@ function serializeUser(u) {
     termsAccepted: u.termsAccepted || false,
     isAdmin: u.isAdmin || false,
     coins:        u.coins || 0,
+    // Ism o'zgartirish narxi — UI backend bilan bir manbadan ko'rsatsin (env bilan boshqariladi)
+    renameCost:   parseInt(process.env.USERNAME_RENAME_COST || '1000'),
     createdAt:    u.createdAt || null,
     activeSkins: {
       color:  u.activeSkinColor  || null,
