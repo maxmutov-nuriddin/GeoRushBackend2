@@ -440,6 +440,12 @@ async function captureTerritory(userId, rawPoints) {
     updatedTerritories = [];
 
     // Yangi territory yaratish (birlashgan bo'lsa — umumiy poligon va maydon bilan)
+    // Birlashishda NOM MEROS QOLADI: eng katta nomli eski hudud nomi/emojisi yangi
+    // hududga o'tadi — aks holda foydalanuvchi qo'ygan nom kengaytirishda yo'qolardi.
+    const inheritedNamed = ownMergeList
+      .filter((t) => t.name)
+      .sort((a, b) => (b.area || 0) - (a.area || 0))[0] || null;
+
     territory = await tx.territory.create({
       data: {
         ownerId: userId,
@@ -447,6 +453,8 @@ async function captureTerritory(userId, rawPoints) {
         polygon: finalGeoPolygon,
         area: finalArea,
         color: user.color,
+        name: inheritedNamed?.name || null,
+        emoji: inheritedNamed?.emoji || null,
         capturedAt: new Date(),
       }
     });

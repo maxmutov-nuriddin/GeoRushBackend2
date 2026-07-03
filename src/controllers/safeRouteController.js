@@ -103,6 +103,12 @@ async function getSafeRoute(req, res) {
     const best = [...scored].sort((a, b) => (b.score - a.score) || (a.distanceM - b.distanceM))[0];
     const fastest = [...scored].sort((a, b) => a.distanceM - b.distanceM)[0];
 
+    // To'g'ri chiziq 15km ichida bo'lsa ham, REAL yo'l haddan tashqari uzun bo'lsa rad
+    // (piyoda UX + bepul routerga hurmat).
+    if (fastest.distanceM > 25000) {
+      return res.status(400).json({ error: 'TOO_FAR' });
+    }
+
     res.json({
       safe: best,
       fastestDistanceM: fastest.distanceM,

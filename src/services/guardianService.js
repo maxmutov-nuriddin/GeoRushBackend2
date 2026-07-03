@@ -117,12 +117,16 @@ function startSweeper() {
          WHERE ("status"='pending' AND "createdAt" < $1) OR ("status"='active' AND "createdAt" < $2)`,
         pendingCut, activeCut
       );
-      // In-memory'dan ham tozalash — DB'da yopilganlarni sinxronlash
-      for (const [walkerId, s] of active) {
-        const row = await prisma.$queryRawUnsafe(
-          `SELECT "status" FROM "GuardianSession" WHERE "id" = $1`, s.sessionId
+      // In-memory'dan ham tozalash — BITTA so'rov bilan (avval har sessiyaga alohida
+      // so'rov edi — sessiya ko'payganda sekinlashardi).
+      if (active.size > 0) {
+        const rows = await prisma.$queryRawUnsafe(
+          `SELECT "id" FROM "GuardianSession" WHERE "status" = 'active'`
         );
-        if (!row.length || row[0].status !== 'active') active.delete(walkerId);
+        const activeIds = new Set(rows.map((r) => r.id));
+        for (const [walkerId, s] of active) {
+          if (!activeIds.has(s.sessionId)) active.delete(walkerId);
+        }
       }
     } catch { /* sweeper — best-effort */ }
   }, 60 * 60 * 1000).unref();

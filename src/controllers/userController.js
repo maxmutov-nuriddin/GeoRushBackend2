@@ -95,7 +95,8 @@ async function updateProfile(req, res, next) {
         select: { username: true, coins: true },
       });
       if (!cur) throw new Error('NOT_FOUND');
-      const renaming = !!(username && username !== cur.username);
+      // Faqat katta-kichik harf farqi (Alisher→alisher) — BEPUL: mohiyatan o'sha ism.
+      const renaming = !!(username && username.toLowerCase() !== cur.username.toLowerCase());
       if (renaming) {
         if ((cur.coins || 0) < RENAME_COST) {
           const e = new Error('NOT_ENOUGH_COINS');
@@ -103,8 +104,10 @@ async function updateProfile(req, res, next) {
           throw e;
         }
         updates.coins = { decrement: RENAME_COST };
+      } else if (username && username !== cur.username) {
+        // Katta-kichik harf farqi — yangilanadi, lekin PULSIZ
       } else {
-        delete updates.username; // o'sha-o'sha ism — pul ham yechilmaydi, P2002 ham bo'lmaydi
+        delete updates.username; // aynan o'sha ism — hech narsa o'zgarmaydi
         if (!Object.keys(updates).length) return tx.user.findUnique({ where: { id: userId }, select: { username: true, color: true, xp: true, level: true, teamId: true, coins: true } });
       }
       return tx.user.update({
