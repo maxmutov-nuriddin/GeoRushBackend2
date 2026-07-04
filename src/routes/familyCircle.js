@@ -12,5 +12,6 @@ router.delete('/:id/zones/:zoneId', authenticate, f.removeZone);
 router.get('/:id/events',         authenticate, f.events);
 router.post('/:id/leave',         authenticate, f.leave);
 router.post('/:id/remove',        authenticate, f.removeMember);
+router.post('/ping',              authenticate, f.ping); // fon-joylashuv (bola telefoni)
 
 module.exports = router;

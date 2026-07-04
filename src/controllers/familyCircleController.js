@@ -324,4 +324,20 @@ async function broadcastCircle(req, circleId, event) {
   } catch (err) { logger.warn('FamilyCircle broadcast skip:', err.message.split('\n')[0]); }
 }
 
-module.exports = { create, join, mine, addZone, removeZone, events, leave, removeMember };
+// POST /api/family/ping { lat, lng } — fon-joylashuv (bola telefoni). Xom GPS SAQLANMAYDI:
+// faqat zona kirish/chiqishни tekshiradi (familyCircleService), voqea bo'lsa push/socket.
+// Yengil: DB yozuv yo'q (checkLocation ichida faqat voqea bo'lsa yoziladi).
+async function ping(req, res, next) {
+  try {
+    const me = String(req.user.id);
+    const lat = Number(req.body?.lat);
+    const lng = Number(req.body?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return res.status(400).json({ error: 'BAD_COORDS' });
+    }
+    familyCircleService.checkLocation(io(req), me, lat, lng);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+module.exports = { create, join, mine, addZone, removeZone, events, leave, removeMember, ping };
