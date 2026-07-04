@@ -456,6 +456,18 @@ model FamilyZone {
   @@index([circleId], map: "FamilyZone_circle_idx")
 }
 
+// "Xavfsiz yo'l" navigatsiyasi tugaganda: manzilga yetib keldimi (xavfsizlik analitikasi).
+model SafeArrival {
+  id          String   @id
+  userId      String
+  arrived     Boolean  @default(true)
+  distanceM   Int      @default(0)
+  durationMin Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt], map: "SafeArrival_user_idx")
+}
+
 // Zona kirish/chiqish voqeasi (tarix). zoneLabel — snapshot (zona o'chsa ham tarix qoladi).
 model FamilyZoneEvent {
   id        String   @id

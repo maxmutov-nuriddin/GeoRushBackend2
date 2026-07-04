@@ -124,4 +124,23 @@ async function getSafeRoute(req, res) {
   }
 }
 
-module.exports = { getSafeRoute };
+// POST /api/safe-route/arrived { arrived, distanceM, durationMin }
+// Navigatsiya tugaganda: foydalanuvchi manzilga yetib keldimi — DB'ga yoziladi (xavfsizlik
+// analitikasi: nechta xavfsiz yetib borish, o'rtacha masofa). Xom GPS SAQLANMAYDI.
+async function recordArrival(req, res, next) {
+  try {
+    const me = String(req.user.id);
+    const arrived = req.body?.arrived === true;
+    const distanceM = Math.max(0, Math.round(Number(req.body?.distanceM) || 0));
+    const durationMin = Math.max(0, Math.round(Number(req.body?.durationMin) || 0));
+    const { randomUUID } = require('crypto');
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "SafeArrival" ("id","userId","arrived","distanceM","durationMin")
+       VALUES ($1,$2,$3,$4,$5)`,
+      randomUUID(), me, arrived, distanceM, durationMin
+    ).catch((e) => logger.warn('SafeArrival insert skip:', e.message.split('\n')[0]));
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+module.exports = { getSafeRoute, recordArrival };

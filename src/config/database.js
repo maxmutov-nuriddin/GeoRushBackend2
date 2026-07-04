@@ -356,6 +356,25 @@ async function ensureCoreTables() {
            FOREIGN KEY ("circleId") REFERENCES "FamilyCircle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
        END IF;
      END $$`,
+
+    // ── SafeArrival — "Xavfsiz yo'l" navigatsiyasi tugaganda: manzilga yetib keldimi.
+    // Xavfsizlik analitikasi (nechta xavfsiz yetib borish). Xom GPS SAQLANMAYDI.
+    `CREATE TABLE IF NOT EXISTS "SafeArrival" (
+       "id"          TEXT NOT NULL,
+       "userId"      TEXT NOT NULL,
+       "arrived"     BOOLEAN NOT NULL DEFAULT true,
+       "distanceM"   INTEGER NOT NULL DEFAULT 0,
+       "durationMin" INTEGER NOT NULL DEFAULT 0,
+       "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "SafeArrival_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE INDEX IF NOT EXISTS "SafeArrival_user_idx" ON "SafeArrival" ("userId", "createdAt" DESC)`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'SafeArrival_userId_fkey') THEN
+         ALTER TABLE "SafeArrival" ADD CONSTRAINT "SafeArrival_userId_fkey"
+           FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
   ];
 
   let ok = 0;
