@@ -268,7 +268,7 @@ async function captureTerritory(userId, rawPoints) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { xp: true, level: true, color: true, teamId: true, isPremium: true, premiumUntil: true, premiumTier: true,
-              expansionsUsed: true, purchasedSlots: true, purchasedExpansions: true }
+              expansionsUsed: true, purchasedSlots: true, purchasedExpansions: true, team: { select: { color: true } } }
   });
   if (!user) throw Object.assign(new Error('User not found'), { status: 404 });
 
@@ -625,6 +625,7 @@ async function captureTerritory(userId, rawPoints) {
       id: territory.id,
       ownerId: userId,
       teamId: user.teamId || null,
+      teamColor: user.team?.color || null,
       polygon: finalGeoPolygon,
       area: finalArea,
       color: user.color,
@@ -695,9 +696,11 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
                u.color as "ownerColor",
                u."isPremium" as "ownerIsPremium",
                u."premiumUntil" as "ownerPremiumUntil",
-               u."isBanned" as "ownerIsBanned"
+               u."isBanned" as "ownerIsBanned",
+               tm.color as "teamColor"
         FROM "Territory" t
         LEFT JOIN "User" u ON t."ownerId" = u.id
+        LEFT JOIN "Team" tm ON t."teamId" = tm.id
         WHERE ST_Intersects(
           ST_GeomFromGeoJSON(t.polygon::text),
           ST_GeomFromGeoJSON(${bboxStr})
@@ -707,7 +710,10 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
       territories = rawTerritories;
     } catch (err) {
       const allT = await prisma.territory.findMany({
-        include: { owner: { select: { username: true, level: true, color: true, isPremium: true, premiumUntil: true, isBanned: true } } }
+        include: {
+          owner: { select: { username: true, level: true, color: true, isPremium: true, premiumUntil: true, isBanned: true } },
+          team: { select: { color: true } },
+        }
       });
       const bboxPoints = [
         [cSwLat, cSwLng],
@@ -728,7 +734,8 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
         ownerColor: t.owner?.color,
         ownerIsPremium: t.owner?.isPremium,
         ownerPremiumUntil: t.owner?.premiumUntil,
-        ownerIsBanned: t.owner?.isBanned
+        ownerIsBanned: t.owner?.isBanned,
+        teamColor: t.team?.color,
       }));
     }
   } else {
@@ -740,15 +747,20 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
                u.color as "ownerColor",
                u."isPremium" as "ownerIsPremium",
                u."premiumUntil" as "ownerPremiumUntil",
-               u."isBanned" as "ownerIsBanned"
+               u."isBanned" as "ownerIsBanned",
+               tm.color as "teamColor"
         FROM "Territory" t
         LEFT JOIN "User" u ON t."ownerId" = u.id
+        LEFT JOIN "Team" tm ON t."teamId" = tm.id
         LIMIT 500
       `;
     } catch (err) {
       const allT = await prisma.territory.findMany({
         take: 500,
-        include: { owner: { select: { username: true, level: true, color: true, isPremium: true, premiumUntil: true, isBanned: true } } }
+        include: {
+          owner: { select: { username: true, level: true, color: true, isPremium: true, premiumUntil: true, isBanned: true } },
+          team: { select: { color: true } },
+        }
       });
       territories = allT.map(t => ({
         ...t,
@@ -757,7 +769,8 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
         ownerColor: t.owner?.color,
         ownerIsPremium: t.owner?.isPremium,
         ownerPremiumUntil: t.owner?.premiumUntil,
-        ownerIsBanned: t.owner?.isBanned
+        ownerIsBanned: t.owner?.isBanned,
+        teamColor: t.team?.color,
       }));
     }
   }
@@ -777,6 +790,7 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
       !t.ownerIsBanned
     ),
     teamId: t.teamId || null,
+    teamColor: t.teamColor || null,
     area: t.area,
     color: t.color,
     // Hudud nomi/emojisi — bular tushirilgani sabab nom "saqlanib, keyin yo'qolib
