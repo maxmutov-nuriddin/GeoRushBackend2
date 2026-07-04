@@ -125,6 +125,18 @@ function handleLocation(io, socket) {
     if (typeof lat !== 'number' || typeof lng !== 'number') return;
     if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
 
+    // ── NAVIGATSIYA rejimi (nav:true) — "chitsiz" ────────────────────────────
+    // Xavfsiz yo'l bo'ylab yurish: o'yin EMAS. Anti-cheat/teleport/spoof, zabt-trail,
+    // masofa, traffic-agregat — HECH BIRI ishlamaydi. Faqat: onlayn holat + Hamroh jonli
+    // uzatuvi + Oila zona kirish/chiqish tekshiruvi. Shu bilan navigatsiya to'liq
+    // o'yin-mexanikasidan ajraladi (foydalanuvchi talabi).
+    if (data.nav === true) {
+      onlineStore.updateLocalPosition(userId, lat, lng);
+      guardianService.forwardLocation(io, userId, lat, lng);
+      familyCircleService.checkLocation(io, userId, lat, lng);
+      return;
+    }
+
     // ── GPS spoofing — SHADOW rejimi (faqat log qiladi, BLOKLAMAYDI) ──────────
     // Android'da expo-location `mocked: true` qaytaradi (mock-location ilovasi yoqilgan).
     // Hozircha faqat AntiCheatLog'ga yozamiz — real ma'lumot to'plangach, ishonch hosil
