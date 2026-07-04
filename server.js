@@ -44,8 +44,10 @@ const premiumRoutes = require('./src/routes/premium');
 const contactRoutes = require('./src/routes/contact');
 const statsRoutes = require('./src/routes/stats');
 const guardianRoutes = require('./src/routes/guardian');
+const familyCircleRoutes = require('./src/routes/familyCircle');
 const safeRouteRoutes = require('./src/routes/safeRoute');
 const guardianService = require('./src/services/guardianService');
+const familyCircleService = require('./src/services/familyCircleService');
 const { globalLimiter } = require('./src/middleware/rateLimiter');
 const { securityMonitor } = require('./src/middleware/securityMonitor');
 const { hppGuard } = require('./src/middleware/hpp');
@@ -189,6 +191,7 @@ app.use('/api/premium', premiumRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/guardian', guardianRoutes);
+app.use('/api/family', familyCircleRoutes);
 app.use('/api/safe-route', safeRouteRoutes);
 app.use('/map', mapRoute);
 
@@ -254,6 +257,9 @@ async function start() {
     await guardianService.loadActive();
     guardianService.startSweeper();
     guardianService.startSignalWatch(io);
+
+    // "Oila Doirasi" — doimiy zonalarni xotiraga tiklash (kirish/chiqish aniqlash uchun)
+    await familyCircleService.loadAll();
 
     server.listen(PORT, () => {
       logger.info(`GeoRush server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);

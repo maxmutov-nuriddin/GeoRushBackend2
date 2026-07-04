@@ -2,6 +2,7 @@ const { validateLocationUpdate } = require('../../services/antiCheatService');
 const { haversineDistance } = require('../../services/geoService');
 const trailStore = require('../../services/trailStore');
 const guardianService = require('../../services/guardianService');
+const familyCircleService = require('../../services/familyCircleService');
 const trafficService = require('../../services/trafficService');
 const onlineStore = require('../../services/onlineStore');
 const { prisma } = require('../../config/database');
@@ -169,6 +170,10 @@ function handleLocation(io, socket) {
     // "Hamroh" — faol kuzatuv sessiyasi bo'lsa, joylashuvni hamrohga jonli uzatamiz
     // (sinxron Map lookup, sessiya yo'q bo'lsa no-op; o'yin logikasiga aralashmaydi)
     guardianService.forwardLocation(io, userId, lat, lng);
+
+    // "Oila Doirasi" — doimiy zonalarga kirish/chiqish aniqlash (sinxron Map lookup +
+    // ichki throttle; zona yo'q bo'lsa darhol no-op, xom GPS saqlanmaydi)
+    familyCircleService.checkLocation(io, userId, lat, lng);
 
     // Admin komnataga ham yuboramiz — real-time monitoring uchun.
     // Faqat admin kuzatayotgan bo'lsa payload yasaymiz (scale rejimida global hisob

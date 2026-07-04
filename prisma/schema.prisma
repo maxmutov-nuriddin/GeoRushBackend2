@@ -414,3 +414,57 @@ model SystemFlag {
   key       String   @id
   createdAt DateTime @default(now())
 }
+
+// ── "Oila Doirasi" (Family Circle) — doimiy oilaviy xavfsizlik ──────────────────
+// Hamroh (GuardianSession) bir martalik/sessiyaviy; Oila Doirasi doimiy holat saqlaydi.
+// MAXFIYLIK: xom GPS trace SAQLANMAYDI — faqat nomlangan zonalarga kirish/chiqish voqealari
+// (vaqt + zona). Kirish/chiqish aniqlash locationHandler hot-path'ida (familyCircleService).
+// Kirish raw SQL orqali (guardianService uslubi) — bu modellar db-push himoyasi uchun,
+// prisma client'da relation kerak emas (userId/circleId oddiy String ustunlar).
+model FamilyCircle {
+  id         String   @id
+  name       String
+  ownerId    String
+  inviteCode String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now())
+
+  @@index([ownerId], map: "FamilyCircle_owner_idx")
+}
+
+model FamilyCircleMember {
+  id        String   @id
+  circleId  String
+  userId    String
+  role      String   @default("child") // "parent" | "child"
+  createdAt DateTime @default(now())
+
+  @@unique([circleId, userId], map: "FamilyCircleMember_circle_user_key")
+  @@index([userId], map: "FamilyCircleMember_user_idx")
+}
+
+model FamilyZone {
+  id          String   @id
+  circleId    String
+  label       String
+  lat         Float
+  lng         Float
+  radiusM     Int      @default(120)
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@index([circleId], map: "FamilyZone_circle_idx")
+}
+
+// Zona kirish/chiqish voqeasi (tarix). zoneLabel — snapshot (zona o'chsa ham tarix qoladi).
+model FamilyZoneEvent {
+  id        String   @id
+  circleId  String
+  zoneId    String
+  userId    String
+  zoneLabel String
+  kind      String   // "enter" | "exit"
+  at        DateTime @default(now())
+
+  @@index([circleId, at], map: "FamilyZoneEvent_circle_at_idx")
+}

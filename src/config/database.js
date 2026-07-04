@@ -272,6 +272,90 @@ async function ensureCoreTables() {
        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
        CONSTRAINT "TrafficDaily_pkey" PRIMARY KEY ("date")
      )`,
+
+    // ── "Oila Doirasi" (Family Circle) — doimiy oilaviy xavfsizlik ─────────────
+    // Xom GPS SAQLANMAYDI: faqat nomlangan zonalarga kirish/chiqish voqealari.
+    // FamilyCircle — doimiy guruh (Team'ga o'xshash, oila uchun; inviteCode bilan qo'shiladi).
+    `CREATE TABLE IF NOT EXISTS "FamilyCircle" (
+       "id"         TEXT NOT NULL,
+       "name"       TEXT NOT NULL,
+       "ownerId"    TEXT NOT NULL,
+       "inviteCode" TEXT NOT NULL,
+       "createdAt"  TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       "updatedAt"  TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "FamilyCircle_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "FamilyCircle_inviteCode_key" ON "FamilyCircle" ("inviteCode")`,
+    `CREATE INDEX IF NOT EXISTS "FamilyCircle_owner_idx" ON "FamilyCircle" ("ownerId")`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FamilyCircle_ownerId_fkey') THEN
+         ALTER TABLE "FamilyCircle" ADD CONSTRAINT "FamilyCircle_ownerId_fkey"
+           FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
+
+    // FamilyCircleMember — a'zolik + rol ("parent" zona boshqaradi, "child" faqat ko'radi).
+    `CREATE TABLE IF NOT EXISTS "FamilyCircleMember" (
+       "id"        TEXT NOT NULL,
+       "circleId"  TEXT NOT NULL,
+       "userId"    TEXT NOT NULL,
+       "role"      TEXT NOT NULL DEFAULT 'child',
+       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "FamilyCircleMember_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "FamilyCircleMember_circle_user_key" ON "FamilyCircleMember" ("circleId", "userId")`,
+    `CREATE INDEX IF NOT EXISTS "FamilyCircleMember_user_idx" ON "FamilyCircleMember" ("userId")`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FamilyCircleMember_circleId_fkey') THEN
+         ALTER TABLE "FamilyCircleMember" ADD CONSTRAINT "FamilyCircleMember_circleId_fkey"
+           FOREIGN KEY ("circleId") REFERENCES "FamilyCircle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FamilyCircleMember_userId_fkey') THEN
+         ALTER TABLE "FamilyCircleMember" ADD CONSTRAINT "FamilyCircleMember_userId_fkey"
+           FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
+
+    // FamilyZone — xaritada nuqta + radius + nom ("Uy", "Maktab"...).
+    `CREATE TABLE IF NOT EXISTS "FamilyZone" (
+       "id"          TEXT NOT NULL,
+       "circleId"    TEXT NOT NULL,
+       "label"       TEXT NOT NULL,
+       "lat"         DOUBLE PRECISION NOT NULL,
+       "lng"         DOUBLE PRECISION NOT NULL,
+       "radiusM"     INTEGER NOT NULL DEFAULT 120,
+       "createdById" TEXT NOT NULL,
+       "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "FamilyZone_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE INDEX IF NOT EXISTS "FamilyZone_circle_idx" ON "FamilyZone" ("circleId")`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FamilyZone_circleId_fkey') THEN
+         ALTER TABLE "FamilyZone" ADD CONSTRAINT "FamilyZone_circleId_fkey"
+           FOREIGN KEY ("circleId") REFERENCES "FamilyCircle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
+
+    // FamilyZoneEvent — kirish/chiqish tarixi. zoneLabel snapshot (zona o'chsa tarix qoladi).
+    `CREATE TABLE IF NOT EXISTS "FamilyZoneEvent" (
+       "id"        TEXT NOT NULL,
+       "circleId"  TEXT NOT NULL,
+       "zoneId"    TEXT NOT NULL,
+       "userId"    TEXT NOT NULL,
+       "zoneLabel" TEXT NOT NULL,
+       "kind"      TEXT NOT NULL,
+       "at"        TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       CONSTRAINT "FamilyZoneEvent_pkey" PRIMARY KEY ("id")
+     )`,
+    `CREATE INDEX IF NOT EXISTS "FamilyZoneEvent_circle_at_idx" ON "FamilyZoneEvent" ("circleId", "at" DESC)`,
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FamilyZoneEvent_circleId_fkey') THEN
+         ALTER TABLE "FamilyZoneEvent" ADD CONSTRAINT "FamilyZoneEvent_circleId_fkey"
+           FOREIGN KEY ("circleId") REFERENCES "FamilyCircle"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+       END IF;
+     END $$`,
   ];
 
   let ok = 0;
