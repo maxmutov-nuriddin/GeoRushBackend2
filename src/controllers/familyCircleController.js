@@ -34,6 +34,14 @@ async function getMembership(circleId, userId) {
   return rows[0] || null;
 }
 
+// Foydalanuvchi qaysidir doirada a'zomi? (BITTA doira qoidasi) — birinchi topilganini qaytaradi.
+async function getAnyMembership(userId) {
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT "circleId" FROM "FamilyCircleMember" WHERE "userId" = $1 LIMIT 1`, String(userId)
+  );
+  return rows[0] || null;
+}
+
 // Doira to'liq holati (a'zolar + zonalar + mening rolim) — bitta payload.
 async function circlePayload(circleId, meId) {
   const [circle, memberRows, zoneRows] = await Promise.all([
@@ -73,6 +81,9 @@ async function create(req, res, next) {
     const me = String(req.user.id);
     const name = String(req.body?.name || '').trim().slice(0, 40) || 'Oilam';
 
+    // BITTA doira qoidasi: allaqachon biror doirada bo'lsa yangi doira yaratolmaydi.
+    if (await getAnyMembership(me)) return res.status(409).json({ error: 'ALREADY_IN_CIRCLE' });
+
     // Yagona taklif kodi (kamdan-kam to'qnashuv — bir necha urinish yetarli).
     let code = genCode();
     for (let i = 0; i < 5; i++) {
@@ -110,6 +121,9 @@ async function join(req, res, next) {
 
     const existing = await getMembership(circle.id, me);
     if (existing) return res.json({ circle: await circlePayload(circle.id, me) }); // allaqachon a'zo
+
+    // BITTA doira qoidasi: boshqa doirada a'zo bo'lsa — qo'shila olmaydi.
+    if (await getAnyMembership(me)) return res.status(409).json({ error: 'ALREADY_IN_CIRCLE' });
 
     const count = await prisma.$queryRawUnsafe(
       `SELECT COUNT(*)::int AS n FROM "FamilyCircleMember" WHERE "circleId" = $1`, circle.id
