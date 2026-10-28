@@ -9,6 +9,7 @@ const { prisma } = require('../../config/database');
 const { encLocation } = require('../../utils/fieldCrypto');
 const constants = require('../../config/constants');
 const { entitlements } = require('../../config/tiers');
+const consumables = require('../../services/consumableService');
 const logger = require('../../utils/logger');
 
 const pendingDistance = new Map(); // userId -> accumulated meters (not yet flushed to DB)
@@ -34,6 +35,10 @@ async function checkProximity(io, attackerId, lat, lng) {
     const now = Date.now();
     if (now - (lastProximityAt.get(attackerId) || 0) < 30000) return;
     lastProximityAt.set(attackerId, now);
+    // Stealth (do'kon, stealth_mode_1h) — hujumchi yaqinlashuv ogohlantirishida ko'rinmaydi.
+    // So'rov shu 30s throttle ichida — har bir o'yinchi uchun ko'pi bilan 30s'da bitta o'qish.
+    const attacker = await prisma.user.findUnique({ where: { id: attackerId }, select: { stealthUntil: true } });
+    if (consumables.isActiveUntil(attacker?.stealthUntil)) return;
     const d = 0.0015; // ~150m bbox
     const box = { type: 'Polygon', coordinates: [[[lng - d, lat - d], [lng + d, lat - d], [lng + d, lat + d], [lng - d, lat + d], [lng - d, lat - d]]] };
     const terr = await prisma.$queryRaw`
@@ -108,6 +113,36 @@ function flushCheat(userId) {
     if (agg.logId) prisma.antiCheatLog.update({ where: { id: agg.logId }, data: { count: agg.count } }).catch(() => {});
     cheatAgg.delete(key);
   }
+}
+
+async function reviveTrail(userId) {
+  const snap = consumables.getReviveSnapshot(userId);
+  if (!snap) return { error: { code: 'NO_SNAPSHOT', message: 'Tiklanadigan trail yo\'q (yoki muddati o\'tgan)' } };
+
+  const current = await trailStore.getTrail(userId);
+  const lastBefore = snap.points[snap.points.length - 1];
+  const live = onlineStore.getLocal(userId);
+  const here = current[0] || (live?.lat != null ? [live.lat, live.lng] : null);
+  if (!here) return { error: { code: 'NO_POSITION', message: 'Joylashuv hali kelmadi' } };
+  const bridge = haversineDistance(lastBefore[0], lastBefore[1], here[0], here[1]);
+  if (bridge > consumables.REVIVE_MAX_BRIDGE_M) {
+    return { error: { code: 'TOO_FAR', message: `Uzilgan joydan juda uzoqdasiz (${Math.round(bridge)} m)` } };
+  }
+
+  const spent = await prisma.user.updateMany({
+    where: { id: userId, reviveTokens: { gte: 1 } },
+    data: { reviveTokens: { decrement: 1 } },
+  });
+  if (spent.count === 0) return { error: { code: 'NO_TOKEN', message: 'Revive tokeningiz yo\'q' } };
+
+  consumables.clearReviveSnapshot(userId);
+  await trailStore.resetTrail(userId);
+  for (const [lat, lng] of [...snap.points, ...current]) {
+    await trailStore.addPoint(userId, lat, lng);
+  }
+  const trail = await trailStore.getTrail(userId);
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { reviveTokens: true } });
+  return { trail, reviveTokens: u?.reviveTokens || 0 };
 }
 
 function handleLocation(io, socket) {
@@ -204,6 +239,12 @@ function handleLocation(io, socket) {
     // relocate = mashina/transport tezligi (chit emas): trail uziladi (capture bo'lmasin),
     // lekin yuqorida LOG QILINMAYDI — faqat teleport (>50 m/s) va gps_spoof loglanadi.
     if (validation.teleport || validation.trailGap || validation.relocate) {
+      // Faqat signal uzilishi (trailGap) tiklanadi — teleport/transport emas. getTrail
+      // resetTrail'dan OLDIN navbatga qo'yiladi (Redis FIFO / xotirada eski massiv saqlanadi).
+      if (validation.trailGap && !validation.teleport && !validation.relocate) {
+        consumables.saveReviveSnapshot(userId, trailStore.getTrail(userId),
+          (info) => socket.emit('trail:revivable', info));
+      }
       trailStore.resetTrail(userId).catch(() => {});
       lastValidPoint = null;
       // Server trail uzildi — jamoadagilarning kartasida ham bu a'zoning chizig'i tozalansin
@@ -257,6 +298,23 @@ function handleLocation(io, socket) {
 
   socket.on('trail:get', async () => {
     socket.emit('trail:current', { trail: await getUserTrail(userId) });
+  });
+
+  // Revive token bilan uzilgan trailni tiklash: uzilishdan oldingi nuqtalar + uzilishdan
+  // keyingi yangi nuqtalar bitta trailga ulanadi. Token FAQAT muvaffaqiyatli tiklashda yechiladi.
+  socket.on('trail:revive', async () => {
+    try {
+      const result = await reviveTrail(userId);
+      if (result.error) {
+        socket.emit('trail:revive_failed', result.error);
+        return;
+      }
+      socket.emit('trail:current', { trail: result.trail });
+      socket.emit('trail:revived', { reviveTokens: result.reviveTokens, points: result.trail.length, trail: result.trail });
+    } catch (err) {
+      logger.error('Trail revive failed', err);
+      socket.emit('trail:revive_failed', { code: 'REVIVE_ERROR', message: 'Trailni tiklab bo\'lmadi' });
+    }
   });
 
   socket.on('trail:reset', async () => {

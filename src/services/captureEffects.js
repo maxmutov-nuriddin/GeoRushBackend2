@@ -167,6 +167,31 @@ async function runPostCaptureEffects({ io, userId, username, result, capturerSoc
     const { completeReferralIfPending } = require('../controllers/referralController');
     await completeReferralIfPending({ userId, io });
   } catch (err) { logger.warn('Referral reward failed', { err: err.message }); }
+
+  // Do'kon shield'i tufayli raqib hududlari kesib chiqarilgan bo'lsa — o'yinchiga xabar
+  // (capture o'zi muvaffaqiyatli; bu faqat "nega maydon kichikroq" tushuntirishi).
+  try {
+    if (Array.isArray(result.shieldBlocked) && result.shieldBlocked.length) {
+      const event = {
+        code: 'SHIELD_PROTECTED',
+        message: 'Ba\'zi hududlar 24 soatlik shield bilan himoyalangan — ular kesib chiqarildi',
+        territoryIds: result.shieldBlocked,
+        full: false,
+      };
+      if (capturerSocket) capturerSocket.emit('territory:shield_blocked', event);
+      else io.to(`user:${userId}`).emit('territory:shield_blocked', event);
+    }
+  } catch (err) { logger.error('Shield-blocked notify failed', err); }
+
+  // B2B Sponsored Zone — hudud bazaga yozilgandan KEYIN, to'liq izolyatsiyada.
+  // Lazy require — sponsoredZone territoryService'ni yuklaydi (circular himoya).
+  try {
+    const { checkAndRewardSponsoredZones } = require('./sponsoredZone');
+    const polygonStr = result.territory?.polygon ? JSON.stringify(result.territory.polygon) : null;
+    await checkAndRewardSponsoredZones(userId, polygonStr, io, {
+      onLevelUp: (lv) => handleLevelUp(io, { userId, username: attackerUsername, result: lv, capturerSocket }),
+    });
+  } catch (err) { logger.error('Sponsored zone check failed', err); }
 }
 
 module.exports = { runPostCaptureEffects, sendExpoPush };

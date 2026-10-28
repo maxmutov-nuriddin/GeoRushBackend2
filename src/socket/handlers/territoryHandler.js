@@ -78,6 +78,14 @@ async function processCaptureFromServerTrail(socket, io, userId) {
         message: err.message,
         requiredLevel: err.requiredLevel,
       });
+    } else if (err.code === 'FULLY_PROTECTED' && err.shieldBlocked?.length) {
+      // Do'kon shield'i bilan himoyalangan hudud — mijoz alohida "qalqon" xabarini ko'rsatadi
+      socket.emit('territory:shield_blocked', {
+        code: 'SHIELD_PROTECTED',
+        message: 'Bu hudud 24 soatlik shield bilan himoyalangan',
+        territoryIds: err.shieldBlocked,
+        full: true,
+      });
     } else if (err.code === 'TERRITORY_LIMIT') {
       socket.emit('territory:blocked', {
         code: 'TERRITORY_LIMIT',
