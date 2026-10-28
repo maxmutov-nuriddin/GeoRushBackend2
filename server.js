@@ -46,6 +46,8 @@ const statsRoutes = require('./src/routes/stats');
 const guardianRoutes = require('./src/routes/guardian');
 const familyCircleRoutes = require('./src/routes/familyCircle');
 const safeRouteRoutes = require('./src/routes/safeRoute');
+const sponsoredRoutes = require('./src/routes/sponsored');
+const paymentRoutes = require('./src/routes/payments');
 const guardianService = require('./src/services/guardianService');
 const familyCircleService = require('./src/services/familyCircleService');
 const { globalLimiter } = require('./src/middleware/rateLimiter');
@@ -193,6 +195,12 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/guardian', guardianRoutes);
 app.use('/api/family', familyCircleRoutes);
 app.use('/api/safe-route', safeRouteRoutes);
+app.use('/api/sponsored', sponsoredRoutes);
+// Click / Payme — so'mda tanga paketlari (callback'lar shu yerda, JWT'siz, imzo bilan)
+app.use('/api/payments', paymentRoutes);
+// PayGate callback aliaslari (/pay/callback yoki /api/paygate/callback)
+app.post('/pay/callback', require('./src/controllers/paygateController').handleComplete);
+app.post('/api/paygate/callback', require('./src/controllers/paygateController').handleComplete);
 app.use('/map', mapRoute);
 
 app.get('/health', (req, res) => {

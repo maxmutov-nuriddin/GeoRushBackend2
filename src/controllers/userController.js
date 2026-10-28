@@ -174,7 +174,9 @@ async function getOnlinePlayers(req, res, next) {
       where: {
         isOnline: true,
         isAdmin: false,
-        lastLocation: { not: null }
+        lastLocation: { not: null },
+        // Stealth (do'kon) faol o'yinchilar ochiq onlayn ro'yxatda ko'rinmaydi
+        OR: [{ stealthUntil: null }, { stealthUntil: { lte: new Date() } }],
       },
       select: { id: true, username: true, color: true, level: true, teamId: true, lastLocation: true }
     });

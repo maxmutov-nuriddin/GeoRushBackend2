@@ -140,6 +140,15 @@ router.get('/promocodes',                  p.getPromoCodes);
 router.patch('/promocodes/:id',            p.togglePromoCode);
 router.delete('/promocodes/:id',           p.deletePromoCode);
 
+
+// ─── B2B Sponsored Zones (kafe/do'kon aksiyalari) ─────────────────────────────
+const sz = require('../controllers/adminSponsoredController');
+router.post('/sponsored-zones',            sz.createZone);
+router.get('/sponsored-zones',             sz.listZones);
+router.patch('/sponsored-zones/:id',       sz.updateZone);
+router.delete('/sponsored-zones/:id',      sz.deleteZone);
+router.get('/sponsored-zones/:id/claims',  sz.getZoneClaims);
+
 // ─── Support Chat ──────────────────────────────────────────────────────────────
 const supportRoutes = require('./adminSupport');
 router.use('/support', supportRoutes);

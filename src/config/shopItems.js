@@ -79,4 +79,21 @@ function getItemById(id) {
   return SHOP_ITEMS.find(i => i.id === id) || null;
 }
 
-module.exports = { SHOP_ITEMS, RARITY_ORDER, RARITY_COLOR, RARITY_PRICE, getItemById };
+// ── ISTE'MOL BUYUMLARI (consumables) — skinlardan ALOHIDA ro'yxat ─────────────
+// SHOP_ITEMS'ga qo'shilmaydi: eski mijozlar /shop/items'dagi har buyumni skin deb
+// ko'rsatadi va /shop/buy ownedSkins'ga yozib yuborardi. Xarid — /shop/buy-consumable.
+// effect: consumableController qaysi ustunni o'zgartirishini belgilaydi.
+//   durationMs — vaqtli effekt (mavjud muddat ustiga QO'SHILADI, qayta yozilmaydi).
+//   needsTerritory — xaridda o'z hududi (territoryId) tanlanishi shart.
+const CONSUMABLES = [
+  { id: 'instant_shield_24h', name: 'Shield 24 soat',   name_uz: 'Shield 24 soat',   type: 'consumable', effect: 'shield',  price: 250, durationMs: 24 * 60 * 60 * 1000, needsTerritory: true,  icon: '🛡️' },
+  { id: 'trail_revive_token', name: 'Trail tiklash',    name_uz: 'Trail tiklash',    type: 'consumable', effect: 'revive',  price: 150, amount: 1,                                                     icon: '♻️' },
+  { id: 'xp_boost_2h',        name: '2x XP (2 soat)',   name_uz: '2x XP (2 soat)',   type: 'consumable', effect: 'xpBoost', price: 200, durationMs: 2 * 60 * 60 * 1000,                                    icon: '⚡' },
+  { id: 'stealth_mode_1h',    name: 'Ko\'rinmas (1 soat)', name_uz: 'Ko\'rinmas (1 soat)', type: 'consumable', effect: 'stealth', price: 300, durationMs: 60 * 60 * 1000,                                  icon: '👻' },
+];
+
+function getConsumableById(id) {
+  return CONSUMABLES.find(i => i.id === id) || null;
+}
+
+module.exports = { SHOP_ITEMS, CONSUMABLES, RARITY_ORDER, RARITY_COLOR, RARITY_PRICE, getItemById, getConsumableById };

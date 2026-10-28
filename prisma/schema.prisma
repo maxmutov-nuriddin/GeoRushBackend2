@@ -65,6 +65,13 @@ model User {
   activeSkinNick      String?
   lastDailyClaim      DateTime?
 
+  // Consumable holatlari + Starter Pack (migrations_manual/099, ensureCoreTables'da ALTER bor).
+  xpBoostUntil        DateTime?    // shu vaqtgacha XP booster faol
+  stealthUntil        DateTime?    // shu vaqtgacha xaritada ko'rinmaydi
+  starterPackBought   Boolean      @default(false) // bir martalik Starter Pack olingan
+  reviveTokens        Int          @default(0)     // uzilgan trailni tiklash tokenlari
+  shieldTokens        Int          @default(0)     // Starter Pack shield — o'yinchi o'zi hududga qo'yadi
+
   isPremium           Boolean      @default(false)
   premiumUntil        DateTime?
   premiumTier         String       @default("free") // "free", "pro", "ultra"
@@ -205,6 +212,8 @@ model Territory {
   capturedAt          DateTime     @default(now())
   name                String?
   emoji               String?
+  // 24 soatlik coin-shield (shop consumable) — tier shieldMargin'dan alohida, vaqt bo'yicha.
+  shieldUntil         DateTime?
 
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
@@ -479,4 +488,72 @@ model FamilyZoneEvent {
   at        DateTime @default(now())
 
   @@index([circleId, at], map: "FamilyZoneEvent_circle_at_idx")
+}
+
+// ── B2B "Sponsored Zone" — kafe/do'kon aksiya zonalari ──────────────────────────
+// DDL: migrations_manual/099 + ensureCoreTables (db-push himoyasi uchun schema'da turadi).
+// geom — PostGIS geometry; Prisma uni o'qiy/yoza olmaydi (Unsupported) — kirish FAQAT
+// raw SQL orqali (ST_Intersects / ST_Buffer). GIST indeks (idx_sponsored_zone_geom) SQL'da.
+model SponsoredZone {
+  id           String   @id
+  businessName String
+  title        String
+  description  String?
+  logoUrl      String?
+  promoCode    String?
+  rewardCoins  Int      @default(100)
+  rewardXp     Int      @default(200)
+  maxClaims    Int?     // null = cheksiz
+  claimedCount Int      @default(0)
+  activeFrom   DateTime @default(now())
+  activeUntil  DateTime
+  isActive     Boolean  @default(true)
+  geom         Unsupported("geometry(Polygon, 4326)")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now())
+
+  @@index([isActive, activeUntil], map: "SponsoredZone_active_idx")
+}
+
+// Kim qaysi aksiyani olgan. UNIQUE(userId, zoneId) — bitta aksiya bitta o'yinchiga 1 marta.
+// userId/zoneId oddiy String (FamilyCircle uslubi) — FK'lar SQL'da, relation kerak emas.
+model SponsoredClaim {
+  id             String   @id
+  userId         String
+  zoneId         String
+  promoCodeGiven String?
+  claimedAt      DateTime @default(now())
+
+  @@unique([userId, zoneId], map: "SponsoredClaim_userId_zoneId_key")
+  @@index([zoneId], map: "SponsoredClaim_zoneId_idx")
+}
+
+// Click / Payme orqali so'mda to'lanadigan tanga paketi buyurtmasi (paymentOrderService).
+// status: "pending" → "paid" | "cancelled". num — Click prepare/confirm id (butun son).
+model PaymentOrder {
+  id               String    @id
+  num              Int       @default(autoincrement())
+  userId           String
+  provider         String    // "click" | "payme" | "paygate"
+  productId        String    // COIN_PACKS kaliti (tiers.js)
+  amountSom        Int
+  status           String    @default("pending")
+  providerTxId     String?
+  paymeState       Int?      // 1 yaratildi · 2 bajarildi · -1 yaratilgandan keyin bekor · -2 bajarilgandan keyin bekor
+  paymeTime        BigInt?
+  paymeCreateTime  BigInt?
+  paymePerformTime BigInt?
+  paymeCancelTime  BigInt?
+  cancelReason     Int?
+  // PayGate (karta → karta): mijoz aynan payAmount so'mni payCard'ga payExpiresAt'gacha o'tkazadi
+  payAmount        Int?
+  payCard          String?
+  payExpiresAt     DateTime?
+  createdAt        DateTime  @default(now())
+  paidAt           DateTime?
+
+  @@unique([num], map: "PaymentOrder_num_key")
+  @@unique([providerTxId], map: "PaymentOrder_providerTxId_key")
+  @@index([userId, createdAt], map: "PaymentOrder_user_idx")
+  @@index([paymeCreateTime], map: "PaymentOrder_paymeCreate_idx")
 }

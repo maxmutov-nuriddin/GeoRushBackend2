@@ -5,8 +5,9 @@ const { polygonAreaM2, geojsonPolygonAreaM2, largestPolygonOf, differenceGeomJS,
 const { bufferToMulti, closeMerge, TOLERANCE_M, HALF_KM } = require('./territoryMergeBackfill');
 const { maskBuildingsFromPolygon } = require('./buildingMaskService');
 const constants = require('../config/constants');
-const { tierOf, entitlements } = require('../config/tiers');
+const { tierOf, entitlements, XP_BOOST_MULT } = require('../config/tiers');
 const { applyPendingRollover } = require('./premiumRollover');
+const { isActiveUntil } = require('./consumableService');
 const logger = require('../utils/logger');
 
 // JS fallback (PostGIS yo'q/xato bo'lganda) — TOLERANTLIK bilan union (backfill bilan izchil).
@@ -268,7 +269,8 @@ async function captureTerritory(userId, rawPoints) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { xp: true, level: true, color: true, teamId: true, isPremium: true, premiumUntil: true, premiumTier: true,
-              expansionsUsed: true, purchasedSlots: true, purchasedExpansions: true, team: { select: { color: true } } }
+              expansionsUsed: true, purchasedSlots: true, purchasedExpansions: true, xpBoostUntil: true,
+              team: { select: { color: true } } }
   });
   if (!user) throw Object.assign(new Error('User not found'), { status: 404 });
 
@@ -322,10 +324,19 @@ async function captureTerritory(userId, rawPoints) {
 
   const protectedList = [];  // himoyalangan (shield) — A maydonidan kesib chiqariladi
   const deletableList = [];  // himoyasiz — A qamragan qismi olinadi (qisman/to'liq)
+  const coinShieldedIds = []; // do'kon shield'i (shieldUntil) tufayli himoyalanganlar — mijozga xabar uchun
+  const shieldNow = new Date();
 
   for (const old of overlapping) {
     if (old.ownerId === userId) continue;
     const owner = ownerMap.get(old.ownerId);
+    // Do'kon shield'i (24 soat) — level/tier'dan qat'i nazar to'liq himoya. Mavjud
+    // protectedList yo'li ishlatiladi: PostGIS kesish mantiqi o'zgarmaydi.
+    if (owner && !owner.isBanned && isActiveUntil(old.shieldUntil, shieldNow)) {
+      protectedList.push(old);
+      coinShieldedIds.push(old.id);
+      continue;
+    }
     // Banlangan egasining hududi "ochiq" — shield YO'Q, istalgan o'yinchi egallashi mumkin
     // (ban olinsa qolgan hududi bilan davom etadi).
     // Shield: null=himoya yo'q (free); 5=pro; 0=ultra. Hujumchi owner.level - margin dan past → himoyalangan.
@@ -346,6 +357,7 @@ async function captureTerritory(userId, rawPoints) {
       const err = new Error('Bu hudud himoyalangan zonalar ichida — egallab bo\'lmaydi');
       err.status = 403;
       err.code = 'FULLY_PROTECTED';
+      err.shieldBlocked = coinShieldedIds;
       throw err;
     }
     workingPolygon = diff.geoPolygon;
@@ -423,7 +435,9 @@ async function captureTerritory(userId, rawPoints) {
   // Haqiqatan kimdandir yer olindi (bosqin) — faqat shunda invasion XP/bildirishnoma.
   const anyRealSteal = deletablePlan.some(p => p.mode !== 'none');
 
-  const xpMultiplier = myEnt.xpMult; // Free 1× / Pro 2× / Ultra 3×
+  // XP booster (do'kon, xp_boost_2h) tier multiplikatori USTIGA ko'paytiriladi.
+  const xpBoosted = isActiveUntil(user.xpBoostUntil);
+  const xpMultiplier = myEnt.xpMult * (xpBoosted ? XP_BOOST_MULT : 1); // Free 1× / Pro 1.25× / Ultra 1.5× (×2 booster)
   // XP — HAQIQATDA egallangan (kesilgan) maydon asosida; bosqin bonusi faqat real yer olinsa.
   const xpGained = (
     Math.floor(Math.pow(finalArea / 100, 0.75) * constants.XP_PER_100M2) +
@@ -446,6 +460,13 @@ async function captureTerritory(userId, rawPoints) {
       .filter((t) => t.name)
       .sort((a, b) => (b.area || 0) - (a.area || 0))[0] || null;
 
+    // Birlashishda do'kon shield'i ham meros qoladi (eng uzog'i) — aks holda kengaytirish
+    // sotib olingan shield'ni jim o'chirib yuborardi.
+    const inheritedShield = ownMergeList
+      .map((t) => t.shieldUntil)
+      .filter((d) => isActiveUntil(d))
+      .sort((a, b) => new Date(b) - new Date(a))[0] || null;
+
     territory = await tx.territory.create({
       data: {
         ownerId: userId,
@@ -455,6 +476,7 @@ async function captureTerritory(userId, rawPoints) {
         color: user.color,
         name: inheritedNamed?.name || null,
         emoji: inheritedNamed?.emoji || null,
+        shieldUntil: inheritedShield ? new Date(inheritedShield) : null,
         capturedAt: new Date(),
       }
     });
@@ -629,6 +651,7 @@ async function captureTerritory(userId, rawPoints) {
       polygon: finalGeoPolygon,
       area: finalArea,
       color: user.color,
+      shieldUntil: territory.shieldUntil || null,
       capturedAt: territory.capturedAt,
     },
     xpGained,
@@ -638,7 +661,10 @@ async function captureTerritory(userId, rawPoints) {
     invasionNotifications,
     neighborNotifications,
     oldLevel: user.level,
-    premiumBonus: xpMultiplier > 1,
+    premiumBonus: myEnt.xpMult > 1,
+    xpBoosted,
+    // Do'kon shield'i tufayli kesib chiqarilgan raqib hududlari — mijozga territory:shield_blocked
+    shieldBlocked: coinShieldedIds,
     // Birlashtirilgan (o'chirilgan) o'z hududlar id'lari — mijoz kartadan olib tashlaydi
     mergedFrom: ownMergeList.map(t => t.id),
     // Qisman kesilib kichraygan (o'chmagan) B zonalar — mijoz darhol yangilashi uchun
@@ -687,7 +713,7 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
       // aniqlik bilan beramiz → payload bir necha barobar kichrayadi, ko'rinishi deyarli bir xil.
       const rawTerritories = await prisma.$queryRaw`
         SELECT t.id, t."ownerId", t."teamId", t.area, t.color, t."capturedAt",
-               t.name, t.emoji, t."createdAt", t."updatedAt",
+               t.name, t.emoji, t."shieldUntil", t."createdAt", t."updatedAt",
                ST_AsGeoJSON(
                  ST_SimplifyPreserveTopology(ST_GeomFromGeoJSON(t.polygon::text), 0.00003), 6
                )::json AS polygon,
@@ -797,6 +823,8 @@ async function getTerritoriesInBounds(swLat, swLng, neLat, neLng) {
     // qolayotgan" edi (DB'da bor, lekin xarita ro'yxatida kelmasdi).
     name: t.name || null,
     emoji: t.emoji || null,
+    // Do'kon shield'i faol bo'lsa — mijoz qalqon belgisini chizadi (faqat ko'rsatish uchun).
+    shieldUntil: isActiveUntil(t.shieldUntil, now) ? t.shieldUntil : null,
     capturedAt: t.capturedAt,
     geometry: typeof t.polygon === 'string' ? JSON.parse(t.polygon) : t.polygon,
   }));
@@ -848,4 +876,4 @@ function calculateLevel(xp) {
   return Math.min(level, thresholds.length);
 }
 
-module.exports = { captureTerritory, getTerritoriesInBounds, getUserTerritories, deleteTerritory };
+module.exports = { captureTerritory, getTerritoriesInBounds, getUserTerritories, deleteTerritory, calculateLevel };

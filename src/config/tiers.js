@@ -91,6 +91,21 @@ const EXPANSION_PACK = { amount: 3, price: 600 };   // +3 kengaytirish (iste'mol
 const TEAM_CREATE_PRICE = 5000;                     // Free: coin bilan jamoa yaratish huquqi (qimmat)
 const PURCHASED_TEAM_MAX_MEMBERS = 4;               // coin bilan ochilgan jamoa a'zo chegarasi (Pro kabi)
 
+// ── Iste'mol effektlari ──────────────────────────────────────────────────────
+// XP booster tier xpMult USTIGA ko'paytiriladi (Ultra 1.5 × 2 = 3×).
+const XP_BOOST_MULT = 2;
+
+// ── So'mda sotiladigan tanga paketlari (Click / Payme / PayGate) ─────────────
+// Telegram Stars paketlari (bot/otpBot.js COIN_PACKS) ALOHIDA — bu ro'yxat faqat
+// so'm to'lov provayderlari uchun. Narx (so'm) server tomonda — mijoz summani bermaydi.
+// starter_pack: bir martalik (User.starterPackBought), 500 coin + 3 kun Pro + 1 shield token.
+const COIN_PACKS = {
+  starter_pack: { priceSom: 9900,  coins: 500,  proDays: 3, shieldTokens: 1, oncePerUser: true },
+  pack_small:   { priceSom: 14900, coins: 700 },
+  pack_medium:  { priceSom: 39900, coins: 2200 },
+  pack_large:   { priceSom: 99000, coins: 6000 },
+};
+
 function isActivePremium(u) {
   return !!(u && u.isPremium && u.premiumUntil && new Date() < new Date(u.premiumUntil));
 }
@@ -123,4 +138,4 @@ function effectiveTeamMax(owner) {
   return owner && owner.purchasedTeamCreate ? PURCHASED_TEAM_MAX_MEMBERS : base;
 }
 
-module.exports = { TIERS, TIER_KEYS, PAID_TIER_KEYS, TERRITORY_SLOT_PRICE, EXPANSION_PACK, TEAM_CREATE_PRICE, PURCHASED_TEAM_MAX_MEMBERS, isActivePremium, tierOf, entitlements, entitlementsPublic, effectiveTeamMax };
+module.exports = { TIERS, TIER_KEYS, PAID_TIER_KEYS, TERRITORY_SLOT_PRICE, EXPANSION_PACK, TEAM_CREATE_PRICE, PURCHASED_TEAM_MAX_MEMBERS, XP_BOOST_MULT, COIN_PACKS, isActivePremium, tierOf, entitlements, entitlementsPublic, effectiveTeamMax };
