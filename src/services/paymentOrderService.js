@@ -10,7 +10,7 @@ const { COIN_PACKS, isActivePremium } = require('../config/tiers');
 const logger = require('../utils/logger');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PROVIDERS = ['click', 'payme'];
+const PROVIDERS = ['click', 'payme', 'paygate'];
 
 function getPack(productId) {
   return Object.prototype.hasOwnProperty.call(COIN_PACKS, productId) ? COIN_PACKS[productId] : null;

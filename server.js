@@ -198,6 +198,9 @@ app.use('/api/safe-route', safeRouteRoutes);
 app.use('/api/sponsored', sponsoredRoutes);
 // Click / Payme — so'mda tanga paketlari (callback'lar shu yerda, JWT'siz, imzo bilan)
 app.use('/api/payments', paymentRoutes);
+// PayGate callback aliaslari (/pay/callback yoki /api/paygate/callback)
+app.post('/pay/callback', require('./src/controllers/paygateController').handleComplete);
+app.post('/api/paygate/callback', require('./src/controllers/paygateController').handleComplete);
 app.use('/map', mapRoute);
 
 app.get('/health', (req, res) => {

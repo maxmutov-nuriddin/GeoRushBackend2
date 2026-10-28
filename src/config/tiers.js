@@ -95,7 +95,7 @@ const PURCHASED_TEAM_MAX_MEMBERS = 4;               // coin bilan ochilgan jamoa
 // XP booster tier xpMult USTIGA ko'paytiriladi (Ultra 1.5 × 2 = 3×).
 const XP_BOOST_MULT = 2;
 
-// ── So'mda sotiladigan tanga paketlari (Click / Payme) ───────────────────────
+// ── So'mda sotiladigan tanga paketlari (Click / Payme / PayGate) ─────────────
 // Telegram Stars paketlari (bot/otpBot.js COIN_PACKS) ALOHIDA — bu ro'yxat faqat
 // so'm to'lov provayderlari uchun. Narx (so'm) server tomonda — mijoz summani bermaydi.
 // starter_pack: bir martalik (User.starterPackBought), 500 coin + 3 kun Pro + 1 shield token.

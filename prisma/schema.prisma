@@ -534,7 +534,7 @@ model PaymentOrder {
   id               String    @id
   num              Int       @default(autoincrement())
   userId           String
-  provider         String    // "click" | "payme"
+  provider         String    // "click" | "payme" | "paygate"
   productId        String    // COIN_PACKS kaliti (tiers.js)
   amountSom        Int
   status           String    @default("pending")
@@ -545,6 +545,10 @@ model PaymentOrder {
   paymePerformTime BigInt?
   paymeCancelTime  BigInt?
   cancelReason     Int?
+  // PayGate (karta → karta): mijoz aynan payAmount so'mni payCard'ga payExpiresAt'gacha o'tkazadi
+  payAmount        Int?
+  payCard          String?
+  payExpiresAt     DateTime?
   createdAt        DateTime  @default(now())
   paidAt           DateTime?
 

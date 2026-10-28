@@ -251,6 +251,10 @@ async function ensureCoreTables() {
     `CREATE UNIQUE INDEX IF NOT EXISTS "PaymentOrder_providerTxId_key" ON "PaymentOrder" ("providerTxId")`,
     `CREATE INDEX IF NOT EXISTS "PaymentOrder_user_idx" ON "PaymentOrder" ("userId", "createdAt")`,
     `CREATE INDEX IF NOT EXISTS "PaymentOrder_paymeCreate_idx" ON "PaymentOrder" ("paymeCreateTime")`,
+    // PayGate (karta → karta): aniq o'tkaziladigan summa, karta va to'lov muddati.
+    `ALTER TABLE "PaymentOrder" ADD COLUMN IF NOT EXISTS "payAmount" INTEGER`,
+    `ALTER TABLE "PaymentOrder" ADD COLUMN IF NOT EXISTS "payCard" TEXT`,
+    `ALTER TABLE "PaymentOrder" ADD COLUMN IF NOT EXISTS "payExpiresAt" TIMESTAMP(3)`,
     `DO $$ BEGIN
        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PaymentOrder_userId_fkey') THEN
          ALTER TABLE "PaymentOrder" ADD CONSTRAINT "PaymentOrder_userId_fkey"

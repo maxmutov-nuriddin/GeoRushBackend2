@@ -125,3 +125,8 @@ DO $$ BEGIN
       FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
   END IF;
 END $$;
+
+-- PayGate (karta → karta, Telegram karta-bot tasdig'i): mijoz aynan shu summani shu kartaga o'tkazadi.
+ALTER TABLE "PaymentOrder" ADD COLUMN IF NOT EXISTS "payAmount"    INTEGER;
+ALTER TABLE "PaymentOrder" ADD COLUMN IF NOT EXISTS "payCard"      TEXT;
+ALTER TABLE "PaymentOrder" ADD COLUMN IF NOT EXISTS "payExpiresAt" TIMESTAMP(3);

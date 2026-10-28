@@ -17,13 +17,24 @@ const click = {
   payUrl: (env.CLICK_PAY_URL || 'https://my.click.uz/services/pay').replace(/\/+$/, ''),
 };
 
+// PayGate — o'z serverimiz: mijoz kartaga o'tkazadi, Telegram karta-bot xabari bilan tasdiqlanadi.
+// callbackUrl — PayGate natijani yuboradigan ochiq manzil (backend'ning o'zi).
+const paygate = {
+  url: (env.PAYGATE_URL || '').replace(/\/+$/, ''),
+  shopId: env.PAYGATE_SHOP_ID || '',
+  shopKey: env.PAYGATE_SHOP_KEY || '',
+  callbackUrl: env.PAYGATE_CALLBACK_URL || '',
+  timeoutMs: parseInt(env.PAYGATE_TIMEOUT_MS || '10000', 10),
+};
+
 // To'lovdan keyin foydalanuvchi qaytadigan sahifa (web Shop sahifasi yoki mobil deep link).
 const returnUrl = env.PAYMENT_RETURN_URL || `${env.FRONTEND_URL || 'http://localhost:5173'}/shop?payment=done`;
 
 function isEnabled(provider) {
   if (provider === 'payme') return !!(payme.merchantId && payme.key);
   if (provider === 'click') return !!(click.serviceId && click.merchantId && click.secretKey);
+  if (provider === 'paygate') return !!(paygate.url && paygate.shopId && paygate.shopKey);
   return false;
 }
 
-module.exports = { payme, click, returnUrl, isEnabled };
+module.exports = { payme, click, paygate, returnUrl, isEnabled };
